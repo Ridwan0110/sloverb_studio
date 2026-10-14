@@ -51,10 +51,10 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python requirements.py --install
+          pip install -r requirements-dev.txt
 
       - name: Verify dependencies
-        run: python requirements.py --check
+        run: pip check
 
       - name: Run PyTest test suite
         run: python -m pytest -v

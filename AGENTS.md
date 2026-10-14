@@ -23,8 +23,8 @@ This document provides a comprehensive technical overview of **SloVerb Studio** 
 ```
 sloverb_studio/
 ├── sloverb_studio.py          # Primary application bootstrap & entry point
-├── requirements.py            # De-bloated dependency specification & CLI installer
-├── requirements.txt           # Minimal pinned/ranged requirements manifest
+├── requirements.txt           # Core runtime dependency manifest
+├── requirements-dev.txt       # Development & testing dependency manifest
 ├── LICENSE                    # MIT License
 ├── assets/
 │   └── fonts/
@@ -125,7 +125,7 @@ The project uses an isolated virtual environment named `pyvenv`:
 python -m venv pyvenv
 
 # Install de-bloated dependencies
-.\pyvenv\Scripts\python.exe requirements.py --install
+.\pyvenv\Scripts\pip.exe install -r requirements-dev.txt
 ```
 
 ### 5.2. Running the Application
