@@ -159,3 +159,5 @@ The complete test suite runs via PyTest and must maintain 100% pass rate:
    - Avoid unbundled controls in `page.overlay` (e.g. legacy `ft.FilePicker`), use native tkinter dialog wrappers (`pick_file_desktop`, `save_file_desktop`).
 4. **Refer to `docs/TODO.md`**:
    - Always check `docs/TODO.md` before making changes to ongoing background poller or waveform synchronization features.
+5. **Adhere to `assets/DESIGN_SYSTEM.md`**:
+   - Refer to `assets/DESIGN_SYSTEM.md` and `assets/design_tokens.json` for component blueprints, exact color tokens, geometry rules, and typographic scales when designing or refactoring UI components.

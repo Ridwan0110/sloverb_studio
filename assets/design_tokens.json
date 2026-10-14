@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "SloVerb Studio Design Tokens",
+  "version": "1.0.0",
+  "description": "Machine-readable design tokens for SloVerb Studio cyber/robotic terminal UI",
+  "typography": {
+    "font_family_primary": "Consolas",
+    "font_family_icons": "FontAwesome",
+    "icon_asset_path": "assets/fonts/fa-solid-900.ttf",
+    "scales": {
+      "app_title": { "size": 16, "weight": "bold", "case": "uppercase" },
+      "section_header": { "size": 11, "weight": "bold", "case": "uppercase" },
+      "control_label": { "size": 11, "weight": "regular", "case": "uppercase" },
+      "time_display": { "size": 13, "weight": "bold", "case": "none" },
+      "metric_label": { "size": 11, "weight": "regular", "case": "uppercase" },
+      "badge": { "size": 10, "weight": "bold", "case": "uppercase" },
+      "button": { "size": 11, "weight": "bold", "case": "uppercase" },
+      "status_banner": { "size": 12, "weight": "bold", "case": "uppercase" },
+      "diagnostic_text": { "size": 10, "weight": "regular", "case": "uppercase" }
+    }
+  },
+  "colors": {
+    "background": {
+      "canvas": "#0D0E12",
+      "surface": "#151821",
+      "surface_light": "#1C202C",
+      "terminal_box": "#0D0E12"
+    },
+    "borders": {
+      "default": "#2C3242",
+      "focus": "#00FFA3",
+      "accent": "#00FFA3",
+      "cyan": "#00D2FF",
+      "amber": "#FFB800",
+      "red": "#FF4B4B"
+    },
+    "text": {
+      "primary": "#ECEFF4",
+      "secondary": "#7B849B",
+      "muted": "#484F58",
+      "cyan": "#00D2FF",
+      "accent": "#00FFA3",
+      "amber": "#FFB800",
+      "red": "#FF4B4B"
+    },
+    "waveform": {
+      "unplayed": "#2C3446",
+      "played": "#00FFA3",
+      "peak_label": "#00FFA3"
+    }
+  },
+  "geometry": {
+    "border_radius": {
+      "standard": 2,
+      "micro": 1,
+      "maximum_allowed": 2
+    },
+    "border_width": {
+      "default": 1
+    },
+    "spacing": {
+      "page_padding_standard": 16,
+      "page_padding_dialog": 24,
+      "card_padding": 12,
+      "dialog_padding": 24,
+      "control_group_spacing": 2,
+      "section_spacing": 8,
+      "row_spacing_standard": 8,
+      "row_spacing_wide": 12
+    },
+    "buttons": {
+      "padding_standard": { "horizontal": 12, "vertical": 8 },
+      "padding_hero": { "horizontal": 16, "vertical": 10 }
+    },
+    "waveform": {
+      "num_bars": 90,
+      "bar_width": 6,
+      "bar_spacing": 2,
+      "total_width": 718,
+      "container_height": 110
+    }
+  },
+  "icons_fontawesome_solid": {
+    "play": "\\uf04b",
+    "pause": "\\uf04c",
+    "stop": "\\uf04d",
+    "rewind": "\\uf04a",
+    "folder_open": "\\uf07c",
+    "bolt": "\\uf0e7",
+    "export": "\\uf019",
+    "magic": "\\uf0d0",
+    "check": "\\uf00c",
+    "warning": "\\uf071",
+    "music": "\\uf001",
+    "undo": "\\uf0e2",
+    "sliders": "\\uf1de",
+    "scissors": "\\uf0c4"
+  },
+  "rules": {
+    "no_emojis": true,
+    "presets_text_only": true,
+    "dark_mode_only": true,
+    "border_radius_cap": 2,
+    "font_family_must_be_consolas": true
+  }
+}
