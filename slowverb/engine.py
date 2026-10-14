@@ -1,0 +1,444 @@
+"""Audio processing engine using FFmpeg and NumPy for SlowVerb Studio."""
+
+from dataclasses import dataclass, field
+import math
+import os
+import re
+import subprocess
+from typing import List, Optional, Tuple
+import numpy as np
+
+from slowverb.config import (
+    DEFAULT_BASS,
+    DEFAULT_PITCH,
+    DEFAULT_REVERB,
+    DEFAULT_SPEED,
+    MAX_BASS,
+    MAX_PITCH,
+    MAX_REVERB,
+    MAX_SPEED,
+    MIN_BASS,
+    MIN_PITCH,
+    MIN_REVERB,
+    MIN_SPEED,
+    get_ffmpeg_path,
+)
+
+
+@dataclass
+class AudioMetadata:
+    """Metadata container for loaded audio files."""
+    filepath: str
+    filename: str
+    duration: float  # seconds
+    sample_rate: int = 44100
+    channels: int = 2
+    bitrate: int = 0
+    format_name: str = ""
+    title: str = ""
+    artist: str = ""
+
+    @property
+    def formatted_duration(self) -> str:
+        """Returns duration in MM:SS.S format."""
+        m = int(self.duration // 60)
+        s = self.duration % 60
+        return f"{m:02d}:{s:04.1f}"
+
+
+@dataclass
+class AudioEffects:
+    """Audio effect parameters with validation and clamping."""
+    speed: float = DEFAULT_SPEED
+    pitch: float = DEFAULT_PITCH
+    link_pitch_to_speed: bool = True
+    reverb_percent: float = DEFAULT_REVERB
+    bass_boost_percent: float = DEFAULT_BASS
+    trim_start: float = 0.0
+    trim_end: Optional[float] = None
+
+    def __post_init__(self):
+        self.clamp_values()
+
+    def clamp_values(self):
+        """Ensures all values stay within safe defined ranges."""
+        self.speed = round(max(MIN_SPEED, min(MAX_SPEED, float(self.speed))), 3)
+        self.pitch = round(max(MIN_PITCH, min(MAX_PITCH, float(self.pitch))), 3)
+        self.reverb_percent = round(max(MIN_REVERB, min(MAX_REVERB, float(self.reverb_percent))), 2)
+        self.bass_boost_percent = round(max(MIN_BASS, min(MAX_BASS, float(self.bass_boost_percent))), 2)
+        if self.trim_start < 0.0:
+            self.trim_start = 0.0
+        if self.trim_end is not None and self.trim_end < self.trim_start:
+            self.trim_end = self.trim_start
+
+    @property
+    def effective_pitch(self) -> float:
+        """If linked to speed, pitch tracks speed ratio; otherwise uses independent pitch."""
+        return self.speed if self.link_pitch_to_speed else self.pitch
+
+    def calculate_output_duration(self, original_duration: float) -> float:
+        """Estimates the resulting duration after trimming and speed scaling."""
+        t_start = max(0.0, self.trim_start)
+        t_end = min(original_duration, self.trim_end) if self.trim_end is not None else original_duration
+        trimmed_len = max(0.0, t_end - t_start)
+        eff_speed = max(0.01, self.speed)
+        return round(trimmed_len / eff_speed, 2)
+
+
+@dataclass
+class WaveformData:
+    """Waveform visualization cache and peak lookup."""
+    peaks: List[float] = field(default_factory=list)  # Normalized 0.0 to 1.0
+    duration: float = 0.0
+    max_peak_db: float = -100.0
+    rms_db: float = -100.0
+
+    def get_peak_at_time(self, time_sec: float) -> float:
+        """Returns normalized peak amplitude (0.0 - 1.0) at specific timestamp."""
+        if not self.peaks or self.duration <= 0:
+            return 0.0
+        ratio = max(0.0, min(1.0, time_sec / self.duration))
+        idx = int(ratio * (len(self.peaks) - 1))
+        return self.peaks[idx]
+
+    def get_peak_db_at_time(self, time_sec: float) -> float:
+        """Returns peak in dBFS at specific timestamp."""
+        peak = self.get_peak_at_time(time_sec)
+        if peak <= 1e-4:
+            return -80.0
+        return round(20.0 * math.log10(peak), 1)
+
+
+class AudioEngine:
+    """Core audio processing engine powered by FFmpeg."""
+
+    def __init__(self, ffmpeg_path: Optional[str] = None, auto_ensure: bool = True):
+        self.ffmpeg_path = ffmpeg_path or get_ffmpeg_path(ensure=auto_ensure)
+        if not os.path.isfile(self.ffmpeg_path):
+            raise FileNotFoundError(
+                f"FFmpeg binary not found at '{self.ffmpeg_path}'. "
+                f"Please ensure FFmpeg is installed system-wide or inside the 'ffmpeg' directory."
+            )
+
+    def probe_file(self, filepath: str) -> AudioMetadata:
+        """Extracts technical metadata from an audio file."""
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(f"Input file not found: {filepath}")
+
+        cmd = [self.ffmpeg_path, "-hide_banner", "-i", filepath, "-f", "null", "-"]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        info = proc.stderr
+
+        if proc.returncode != 0 or "Invalid data found" in info:
+            raise RuntimeError(f"Failed to read audio file '{filepath}': {info.strip()}")
+
+        # Duration
+        dur_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", info)
+        if dur_match:
+            hours = int(dur_match.group(1))
+            minutes = int(dur_match.group(2))
+            seconds = float(dur_match.group(3))
+            duration = hours * 3600 + minutes * 60 + seconds
+        else:
+            raise RuntimeError(f"Could not determine audio duration from '{filepath}'")
+
+        # Sample Rate
+        sr_match = re.search(r"(\d+)\s*Hz", info)
+        sample_rate = int(sr_match.group(1)) if sr_match else 44100
+
+        # Channels
+        channels = 2
+        if "stereo" in info:
+            channels = 2
+        elif "mono" in info:
+            channels = 1
+        else:
+            ch_match = re.search(r"(\d+)\s*channels", info)
+            if ch_match:
+                channels = int(ch_match.group(1))
+
+        # Bitrate
+        br_match = re.search(r"bitrate:\s*(\d+)\s*kb/s", info)
+        bitrate = int(br_match.group(1)) if br_match else 0
+
+        # Title & Artist
+        title_match = re.search(r"title\s*:\s*(.+)", info, re.IGNORECASE)
+        artist_match = re.search(r"artist\s*:\s*(.+)", info, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else os.path.splitext(os.path.basename(filepath))[0]
+        artist = artist_match.group(1).strip() if artist_match else ""
+
+        # Format
+        ext = os.path.splitext(filepath)[1].lstrip(".").lower()
+
+        return AudioMetadata(
+            filepath=os.path.abspath(filepath),
+            filename=os.path.basename(filepath),
+            duration=duration,
+            sample_rate=sample_rate,
+            channels=channels,
+            bitrate=bitrate,
+            format_name=ext,
+            title=title,
+            artist=artist,
+        )
+
+    def extract_waveform(self, filepath: str, num_bins: int = 100) -> WaveformData:
+        """
+        Downsamples the audio track to 8kHz mono and extracts peak amplitudes
+        binned across the duration for responsive GUI waveform rendering.
+        """
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(f"Input file not found: {filepath}")
+
+        meta = self.probe_file(filepath)
+        if meta.duration <= 0.0:
+            return WaveformData(peaks=[0.0] * num_bins, duration=0.0)
+
+        cmd = [
+            self.ffmpeg_path,
+            "-y",
+            "-i", filepath,
+            "-ac", "1",
+            "-ar", "8000",
+            "-f", "s16le",
+            "-"
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg waveform extraction failed: {proc.stderr.decode('utf-8', errors='ignore')}")
+
+        raw_data = np.frombuffer(proc.stdout, dtype=np.int16)
+        if len(raw_data) == 0:
+            return WaveformData(peaks=[0.0] * num_bins, duration=meta.duration)
+
+        float_samples = np.abs(raw_data.astype(np.float32) / 32768.0)
+        overall_max = float(np.max(float_samples)) if len(float_samples) > 0 else 0.0
+        overall_rms = float(np.sqrt(np.mean(float_samples ** 2))) if len(float_samples) > 0 else 0.0
+
+        max_db = round(20.0 * math.log10(max(1e-5, overall_max)), 1)
+        rms_db = round(20.0 * math.log10(max(1e-5, overall_rms)), 1)
+
+        bin_size = max(1, len(float_samples) // num_bins)
+        peaks: List[float] = []
+
+        for i in range(num_bins):
+            start = i * bin_size
+            end = min(len(float_samples), (i + 1) * bin_size)
+            if start < len(float_samples):
+                chunk_peak = float(np.max(float_samples[start:end]))
+            else:
+                chunk_peak = 0.0
+            peaks.append(chunk_peak)
+
+        # Normalize peaks so maximum bar reaches near 1.0 while preserving relative dynamics
+        norm_factor = max(peaks) if peaks and max(peaks) > 0 else 1.0
+        normalized_peaks = [min(1.0, round(p / norm_factor, 3)) for p in peaks]
+
+        return WaveformData(
+            peaks=normalized_peaks,
+            duration=meta.duration,
+            max_peak_db=max_db,
+            rms_db=rms_db,
+        )
+
+    def extract_waveform_from_samples(
+        self, samples: np.ndarray, sample_rate: int = 44100, num_bins: int = 90, duration: Optional[float] = None
+    ) -> WaveformData:
+        """
+        Extracts peak amplitudes and dB readings directly from an in-memory numpy audio buffer.
+        """
+        dur = duration if duration is not None else (len(samples) / sample_rate if sample_rate > 0 else 0.0)
+        if len(samples) == 0:
+            return WaveformData(peaks=[0.0] * num_bins, duration=dur)
+
+        float_samples = np.abs(samples.astype(np.float32))
+        overall_max = float(np.max(float_samples)) if len(float_samples) > 0 else 0.0
+        overall_rms = float(np.sqrt(np.mean(float_samples ** 2))) if len(float_samples) > 0 else 0.0
+
+        max_db = round(20.0 * math.log10(max(1e-5, overall_max)), 1)
+        rms_db = round(20.0 * math.log10(max(1e-5, overall_rms)), 1)
+
+        bin_size = max(1, len(float_samples) // num_bins)
+        peaks: List[float] = []
+
+        for i in range(num_bins):
+            start = i * bin_size
+            end = min(len(float_samples), (i + 1) * bin_size)
+            if start < len(float_samples):
+                chunk_peak = float(np.max(float_samples[start:end]))
+            else:
+                chunk_peak = 0.0
+            peaks.append(chunk_peak)
+
+        norm_factor = max(peaks) if peaks and max(peaks) > 0 else 1.0
+        normalized_peaks = [min(1.0, round(p / norm_factor, 3)) for p in peaks]
+
+        return WaveformData(
+            peaks=normalized_peaks,
+            duration=dur,
+            max_peak_db=max_db,
+            rms_db=rms_db,
+        )
+
+    def build_audio_filter_string(self, effects: AudioEffects) -> str:
+        """
+        Builds the FFmpeg audio filter string (-af) implementing:
+        1. Speed & Pitch via rubberband
+        2. Bass boost via lowshelf / bass filter
+        3. Reverb via tuned multi-stage aecho
+        4. Soft peak limiter to prevent digital clipping
+        """
+        filters: List[str] = []
+
+        # 1. Speed and Pitch
+        speed = effects.speed
+        pitch = effects.effective_pitch
+        # Apply rubberband if speed or pitch differs from unity (1.0)
+        if abs(speed - 1.0) > 1e-4 or abs(pitch - 1.0) > 1e-4:
+            filters.append(f"rubberband=tempo={speed:.4f}:pitch={pitch:.4f}")
+
+        # 2. Bass Boost (0% - 100% maps to 0dB - 18dB gain at 100Hz)
+        if effects.bass_boost_percent > 0.01:
+            gain_db = (effects.bass_boost_percent / 100.0) * 18.0
+            filters.append(f"bass=g={gain_db:.2f}:f=100")
+
+        # 3. Reverb (0% - 100%)
+        if effects.reverb_percent > 0.01:
+            w = max(0.01, min(1.0, effects.reverb_percent / 100.0))
+            # Multi-tap warm reverb reflection delays and decays
+            in_gain = max(0.68, 1.0 - 0.25 * w)
+            out_gain1 = min(0.85, 0.28 + 0.50 * w)
+            out_gain2 = out_gain1 * 0.70
+
+            # Early reflections
+            d1 = "50|100|200|350"
+            decay1 = f"{0.50*w:.2f}|{0.38*w:.2f}|{0.28*w:.2f}|{0.18*w:.2f}"
+            filters.append(f"aecho={in_gain:.2f}:{out_gain1:.2f}:{d1}:{decay1}")
+
+            # Late diffusion reflections
+            d2 = "70|150|300|600"
+            decay2 = f"{0.35*w:.2f}|{0.25*w:.2f}|{0.18*w:.2f}|{0.10*w:.2f}"
+            filters.append(f"aecho={in_gain:.2f}:{out_gain2:.2f}:{d2}:{decay2}")
+
+        # 4. Limiter to avoid clipping if effects pushed gain
+        if effects.bass_boost_percent > 0.01 or effects.reverb_percent > 0.01:
+            filters.append("alimiter=limit=0.98")
+
+        return ",".join(filters)
+
+    def export_audio(
+        self,
+        input_path: str,
+        output_path: str,
+        effects: AudioEffects,
+        export_format: Optional[str] = None,
+    ) -> Tuple[str, int]:
+        """
+        Exports the processed audio to MP3 or Opus with effects and trimming applied.
+        Returns: (output_path, file_size_in_bytes)
+        """
+        if not os.path.isfile(input_path):
+            raise FileNotFoundError(f"Input file not found: {input_path}")
+
+        effects.clamp_values()
+        ext = export_format or os.path.splitext(output_path)[1].lstrip(".").lower()
+        if not ext:
+            ext = "opus"
+        ext = ext.lower()
+
+        if ext not in ["opus", "mp3", "wav"]:
+            raise ValueError(f"Unsupported export format '{ext}'. Must be 'opus', 'mp3', or 'wav'.")
+
+        # Ensure output directory exists
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        cmd: List[str] = [self.ffmpeg_path, "-y"]
+
+        # Trimming start
+        if effects.trim_start > 0.001:
+            cmd.extend(["-ss", f"{effects.trim_start:.3f}"])
+
+        # Trimming end
+        if effects.trim_end is not None and effects.trim_end > effects.trim_start:
+            cmd.extend(["-to", f"{effects.trim_end:.3f}"])
+
+        cmd.extend(["-i", os.path.abspath(input_path)])
+
+        # Build filter graph
+        af = self.build_audio_filter_string(effects)
+        if af:
+            cmd.extend(["-af", af])
+
+        # Codec configuration
+        if ext == "opus":
+            cmd.extend(["-c:a", "libopus", "-b:a", "160k", "-vbr", "on"])
+        elif ext == "mp3":
+            cmd.extend(["-c:a", "libmp3lame", "-b:a", "192k", "-q:a", "2"])
+        elif ext == "wav":
+            cmd.extend(["-c:a", "pcm_s16le"])
+
+        cmd.append(os.path.abspath(output_path))
+
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg export failed with error:\n{proc.stderr}")
+
+        if not os.path.isfile(output_path):
+            raise FileNotFoundError(f"Export output file was not created at '{output_path}'")
+
+        file_size = os.path.getsize(output_path)
+        if file_size == 0:
+            raise RuntimeError(f"Exported output file is empty (0 bytes): '{output_path}'")
+
+        return output_path, file_size
+
+    def render_pcm_buffer(
+        self,
+        input_path: str,
+        effects: AudioEffects,
+        target_sample_rate: int = 44100,
+        max_duration_seconds: Optional[float] = None,
+    ) -> Tuple[np.ndarray, int]:
+        """
+        Renders the processed audio to a 2D float32 NumPy array (stereo)
+        for real-time playback and seek previewing.
+        """
+        if not os.path.isfile(input_path):
+            raise FileNotFoundError(f"Input file not found: {input_path}")
+
+        effects.clamp_values()
+        cmd: List[str] = [self.ffmpeg_path, "-y"]
+
+        if effects.trim_start > 0.001:
+            cmd.extend(["-ss", f"{effects.trim_start:.3f}"])
+        if effects.trim_end is not None and effects.trim_end > effects.trim_start:
+            cmd.extend(["-to", f"{effects.trim_end:.3f}"])
+
+        cmd.extend(["-i", os.path.abspath(input_path)])
+
+        if max_duration_seconds is not None:
+            cmd.extend(["-t", f"{max_duration_seconds:.3f}"])
+
+        af = self.build_audio_filter_string(effects)
+        if af:
+            cmd.extend(["-af", af])
+
+        cmd.extend([
+            "-ac", "2",
+            "-ar", str(target_sample_rate),
+            "-f", "f32le",
+            "-"
+        ])
+
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Failed to render audio buffer: {proc.stderr.decode('utf-8', errors='ignore')}")
+
+        samples = np.frombuffer(proc.stdout, dtype=np.float32)
+        if len(samples) % 2 != 0:
+            samples = samples[: len(samples) - (len(samples) % 2)]
+
+        stereo_samples = samples.reshape((-1, 2))
+        return stereo_samples, target_sample_rate
