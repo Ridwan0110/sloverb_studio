@@ -54,7 +54,9 @@ jobs:
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install portaudio ffmpeg
+          brew install portaudio ffmpeg-full
+          brew link --overwrite --force ffmpeg-full
+          echo "$(brew --prefix ffmpeg-full)/bin" >> $GITHUB_PATH
 
       - name: Set up FFmpeg (Windows)
         if: runner.os == 'Windows'

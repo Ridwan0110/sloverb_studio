@@ -97,3 +97,21 @@ def test_render_pcm_buffer(engine, sample_sine_audio):
     assert samples.dtype == "float32"
     assert sr == 44100
     assert len(samples) > 0
+
+
+def test_has_filter_detection(engine):
+    """Test that has_filter detects supported filters."""
+    # Rubberband is supported in local bundled ffmpeg
+    assert engine.has_filter("rubberband") is True
+    # Non-existent filter returns False
+    assert engine.has_filter("nonexistent_filter_xyz_99") is False
+
+
+def test_build_filter_rubberband_missing_raises_error(engine, monkeypatch):
+    """Test that build_audio_filter_string raises clear RuntimeError if rubberband is missing."""
+    monkeypatch.setattr(engine, "has_filter", lambda name: False if name == "rubberband" else True)
+    fx = AudioEffects(speed=0.8)
+    import pytest
+    with pytest.raises(RuntimeError, match="does not support the 'rubberband' audio filter"):
+        engine.build_audio_filter_string(fx)
+

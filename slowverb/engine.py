@@ -280,6 +280,31 @@ class AudioEngine:
             rms_db=rms_db,
         )
 
+    def has_filter(self, filter_name: str) -> Optional[bool]:
+        """
+        Checks if a specific filter is supported by the current FFmpeg installation.
+        Returns True/False if determinable, or None if FFmpeg could not be queried.
+        """
+        if not hasattr(self, "_supported_filters"):
+            try:
+                cmd = [self.ffmpeg_path, "-hide_banner", "-filters"]
+                proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if proc.returncode == 0:
+                    self._supported_filters = {
+                        parts[1]
+                        for line in proc.stdout.splitlines()
+                        for parts in [line.split()]
+                        if len(parts) >= 2
+                    }
+                else:
+                    self._supported_filters = None
+            except Exception:
+                self._supported_filters = None
+
+        if self._supported_filters is None:
+            return None
+        return filter_name in self._supported_filters
+
     def build_audio_filter_string(self, effects: AudioEffects) -> str:
         """
         Builds the FFmpeg audio filter string (-af) implementing:
@@ -295,6 +320,12 @@ class AudioEngine:
         pitch = effects.effective_pitch
         # Apply rubberband if speed or pitch differs from unity (1.0)
         if abs(speed - 1.0) > 1e-4 or abs(pitch - 1.0) > 1e-4:
+            if self.has_filter("rubberband") is False:
+                raise RuntimeError(
+                    f"FFmpeg binary at '{self.ffmpeg_path}' does not support the 'rubberband' audio filter "
+                    f"required for speed and pitch adjustments. Please install a full FFmpeg build "
+                    f"(e.g., 'brew install ffmpeg-full' on macOS or Gyan full build on Windows)."
+                )
             filters.append(f"rubberband=tempo={speed:.4f}:pitch={pitch:.4f}")
 
         # 2. Bass Boost (0% - 100% maps to 0dB - 18dB gain at 100Hz)
