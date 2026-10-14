@@ -182,11 +182,7 @@ cython_debug/
 .cursorindexingignore
 
 # redu-dev
-eien - melancholy (Slowed + Reverb).mp3
-eien - melancholy (Slowed + Reverb).opus
-eien - melancholys.opus
 eien - melancholy.opus
-export_melancholy.py
 main.py
 ffmpeg/
-
+redu-dev/commit_history.json

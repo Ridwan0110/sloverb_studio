@@ -35,3 +35,5 @@ When clicking `PREVIEW EFFECTS` in the application:
 - [ ] Add customizable high-shelf EQ (treble boost / air).
 - [ ] Provide preset saving and loading to user configuration JSON.
 - [ ] Add drag-and-drop file loading support onto the waveform card.
+- [ ] Add Apple macOS DMG installer packaging (.dmg via create-dmg) for release distributions.
+
