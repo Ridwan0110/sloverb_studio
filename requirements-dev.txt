@@ -4,4 +4,5 @@ pytest>=8.0.0
 anyio>=4.0.0
 pyinstaller>=6.0.0
 flet-desktop>=1.0.0
+flet-cli>=1.0.0
 

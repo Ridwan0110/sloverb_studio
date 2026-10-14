@@ -56,6 +56,7 @@ def test_check_prerequisites():
     assert prereqs["entry_point"] is True
     assert prereqs["font_awesome"] is True
     assert prereqs["packages"]["flet"] is True
+    assert prereqs["packages"]["flet_cli"] is True
     assert prereqs["packages"]["PyInstaller"] is True
     assert prereqs["packages"]["sounddevice"] is True
     assert prereqs["packages"]["numpy"] is True
