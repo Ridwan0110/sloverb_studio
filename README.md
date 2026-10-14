@@ -1,6 +1,6 @@
 # SlowVerb Studio
 
-[![CI Tests](https://github.com/Ridwan0110/sloverb_studio/actions/workflows/ci.yaml/badge.svg)](https://github.com/Ridwan0110/slowverb/actions/workflows/ci.yml)
+[![CI Tests](https://github.com/Ridwan0110/sloverb_studio/actions/workflows/ci.yaml/badge.svg)](https://github.com/Ridwan0110/slowverb/actions/workflows/ci.yaml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://opensource.org/license/mit/)
 [![Version](https://img.shields.io/github/v/release/Ridwan0110/sloverb_studio?include_prereleases&label=version&color=blue)](https://github.com/Ridwan0110/sloverb_studio/releases)
