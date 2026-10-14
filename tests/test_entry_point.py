@@ -34,11 +34,13 @@ class MockPage:
 
 
 def test_import_entry_point():
-    """Verify sloverb_studio exposes main and start_app callables."""
+    """Verify sloverb_studio exposes main, start_app callables, and __version__."""
     assert hasattr(sloverb_studio, "main")
     assert callable(sloverb_studio.main)
     assert hasattr(sloverb_studio, "start_app")
     assert callable(sloverb_studio.start_app)
+    assert hasattr(sloverb_studio, "__version__")
+    assert sloverb_studio.__version__ == "0.1.0"
 
 
 def test_main_page_bootstrap():

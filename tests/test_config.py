@@ -70,3 +70,11 @@ def test_preset_default_values():
     assert PRESET_DEFAULT.reverb == 0.0
     assert PRESET_DEFAULT.pitch == 1.0
     assert PRESET_DEFAULT.bass_boost == 0.0
+
+
+def test_package_version():
+    """Verify package version is 0.1.0 as single source of truth."""
+    import slowverb
+
+    assert slowverb.__version__ == "0.1.0"
+

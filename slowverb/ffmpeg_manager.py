@@ -48,8 +48,11 @@ FFMPEG_DOWNLOAD_URLS: Dict[Tuple[str, str], List[str]] = {
 
 def get_project_root() -> str:
     """Returns the absolute path to the application root directory."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
     current_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.abspath(os.path.join(current_dir, ".."))
+
 
 
 def is_valid_ffmpeg_binary(binary_path: str) -> bool:
@@ -135,6 +138,11 @@ def find_local_ffmpeg(project_root: Optional[str] = None) -> Optional[str]:
         os.path.join(root, exe_name),
         os.path.join(cwd, exe_name),
     ]
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidates.extend([
+            os.path.join(sys._MEIPASS, "ffmpeg", exe_name),
+            os.path.join(sys._MEIPASS, exe_name),
+        ])
 
     for candidate in candidates:
         if candidate and is_valid_ffmpeg_binary(candidate):

@@ -4,6 +4,7 @@ import os
 import sys
 import flet as ft
 
+from slowverb import __version__
 from slowverb.ui import SlowVerbApp
 
 

@@ -401,6 +401,9 @@ class SlowVerbApp:
         self._playback_poll_active = False
         self._playback_poller_id = 0
         self._ui_lock = threading.Lock()
+        from slowverb import __version__
+
+        self.version: str = __version__
         self._pending_cli_file: Optional[str] = None
         self.ffmpeg_setup_view: Optional[FFmpegSetupView] = None
 
@@ -584,6 +587,14 @@ class SlowVerbApp:
             font_family=ROBOTIC_FONT,
             size=11,
             color=COLOR_CYAN,
+        )
+
+        self.version_badge_text = ft.Text(
+            f"v{self.version}",
+            font_family=ROBOTIC_FONT,
+            size=11,
+            color=COLOR_TEXT_DIM,
+            weight=ft.FontWeight.BOLD,
         )
 
         # Waveform peeking and timeline info
@@ -878,6 +889,7 @@ class SlowVerbApp:
             ),
             ft.Row([
                 self.format_badge_text,
+                self.version_badge_text,
             ], spacing=10),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 

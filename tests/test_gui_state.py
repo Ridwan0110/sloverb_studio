@@ -206,10 +206,16 @@ def test_section_titles_and_badges():
     effects_card = controls[5]
     export_card = controls[6]
 
-    # 1. Header Bar: "SLOVERB STUDIO" with codec badge on right
+    # 1. Header Bar: "SLOVERB STUDIO" with codec badge on right, followed by version
     header_title_text = header_row.controls[0].value
     assert header_title_text == "SLOVERB STUDIO"
-    assert app.format_badge_text in header_row.controls[1].controls
+    right_header_controls = header_row.controls[1].controls
+    assert app.format_badge_text in right_header_controls
+    assert app.version_badge_text in right_header_controls
+    codec_idx = right_header_controls.index(app.format_badge_text)
+    version_idx = right_header_controls.index(app.version_badge_text)
+    assert version_idx == codec_idx + 1
+    assert "0.1.0" in app.version_badge_text.value
 
     # 2. Waveform Card: Left -> "PEEK", Right -> None
     wave_header_row = waveform_card.content.controls[0]
