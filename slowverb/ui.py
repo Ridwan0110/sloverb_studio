@@ -1,9 +1,10 @@
 """Desktop GUI for SlowVerb Studio using Flet with minimalistic square/robotic styling."""
 
 import os
+import platform
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Callable, Dict, Any, List, Optional, Tuple
 
 import flet as ft
 
@@ -115,13 +116,274 @@ def save_file_desktop(initial_filename: str, ext: str, initial_dir: Optional[str
         return None
 
 
+from slowverb.ffmpeg_manager import (
+    download_ffmpeg,
+    find_ffmpeg,
+    get_project_root,
+    normalize_platform_arch,
+)
+
+
+class FFmpegSetupView(ft.Container):
+    """
+    Cyber/robotic Flet view displayed when FFmpeg is missing.
+    Prompts the user to download FFmpeg and renders real-time download progress.
+    """
+
+    def __init__(
+        self,
+        page: Optional[ft.Page],
+        on_success: Callable[[str], None],
+        on_cancel: Optional[Callable[[], None]] = None,
+        target_dir: Optional[str] = None,
+    ):
+        self.target_page = page
+        self.on_success = on_success
+        self.on_cancel = on_cancel
+        self.target_dir = target_dir or os.path.join(get_project_root(), "ffmpeg")
+        self._ui_lock = threading.Lock()
+        self.is_downloading = False
+
+        os_name, arch = normalize_platform_arch()
+        exe_name = "ffmpeg.exe" if platform.system().lower() == "windows" else "ffmpeg"
+        target_file_path = os.path.join(self.target_dir, exe_name)
+
+        # Header controls
+        self.header_icon = ft.Text(
+            FA_BOLT,
+            font_family=FONT_AWESOME_FONT,
+            size=16,
+            color=COLOR_ACCENT,
+        )
+        self.header_title = ft.Text(
+            "FFMPEG MISSING",
+            font_family=ROBOTIC_FONT,
+            size=12,
+            weight=ft.FontWeight.BOLD,
+            color=COLOR_TEXT,
+        )
+        self.arch_badge = ft.Container(
+            content=ft.Text(
+                f"{os_name.upper()} // {arch.upper()}",
+                font_family=ROBOTIC_FONT,
+                size=10,
+                weight=ft.FontWeight.BOLD,
+                color=COLOR_CYAN,
+            ),
+            bgcolor=COLOR_SURFACE,
+            border=ft.Border.all(width=1, color=COLOR_CYAN),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+        )
+
+        header_row = ft.Row(
+            [
+                ft.Row([self.header_icon, self.header_title], spacing=8),
+                self.arch_badge,
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+        # Description text
+        desc_text = ft.Text(
+            "SloVerb Studio requires the FFmpeg to process real-time audio effects "
+            "(pitch, reverberation, speed, bass boost), render audio waveforms, and export audio tracks.",
+            font_family=ROBOTIC_FONT,
+            size=11,
+            color=COLOR_TEXT_DIM,
+        )
+
+        # Technical diagnostic info box
+        self.target_path_text = ft.Text(
+            f"DESTINATION: {target_file_path}",
+            font_family=ROBOTIC_FONT,
+            size=10,
+            color=COLOR_TEXT_DIM,
+        )
+        info_lines = [
+            ft.Text(
+                "STATUS: MISSING FROM SYSTEM PATH & LOCAL APPLICATION DIRECTORY",
+                font_family=ROBOTIC_FONT,
+                size=11,
+                weight=ft.FontWeight.BOLD,
+                color=COLOR_AMBER,
+            ),
+            self.target_path_text,
+            ft.Text(
+                "SOURCE: OFFICIAL STATIC PRE-BUILT RELEASES",
+                font_family=ROBOTIC_FONT,
+                size=10,
+                color=COLOR_TEXT_DIM,
+            ),
+        ]
+        info_box = ft.Container(
+            content=ft.Column(info_lines, spacing=4),
+            bgcolor=COLOR_BG,
+            border=ft.Border.all(width=1, color=COLOR_BORDER),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.all(12),
+        )
+
+        # Prompt question
+        self.prompt_text = ft.Text(
+            "Would you like SloVerb Studio to automatically download FFmpeg now?",
+            font_family=ROBOTIC_FONT,
+            size=12,
+            weight=ft.FontWeight.BOLD,
+            color=COLOR_TEXT,
+        )
+
+        # Progress elements (initially hidden)
+        self.progress_bar = ft.ProgressBar(
+            value=0.0,
+            color=COLOR_ACCENT,
+            bgcolor=COLOR_SURFACE,
+            height=8,
+            border_radius=ft.BorderRadius.all(2),
+            visible=False,
+        )
+        self.status_label = ft.Text(
+            "READY TO DOWNLOAD",
+            font_family=ROBOTIC_FONT,
+            size=11,
+            color=COLOR_TEXT_DIM,
+        )
+        self.detail_label = ft.Text(
+            "",
+            font_family=ROBOTIC_FONT,
+            size=10,
+            color=COLOR_CYAN,
+            visible=False,
+        )
+
+        # Interactive buttons
+        self.btn_download_text = ft.Text(
+            "DOWNLOAD FFMPEG",
+            font_family=ROBOTIC_FONT,
+            size=11,
+            weight=ft.FontWeight.BOLD,
+            color=COLOR_BG,
+        )
+        self.btn_download = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text(FA_BOLT, font_family=FONT_AWESOME_FONT, size=11, color=COLOR_BG),
+                    self.btn_download_text,
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                spacing=6,
+            ),
+            bgcolor=COLOR_ACCENT,
+            border=ft.Border.all(width=1, color=COLOR_ACCENT),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.symmetric(horizontal=16, vertical=10),
+            alignment=ft.Alignment.CENTER,
+            on_click=self._on_download_click,
+            ink=True,
+        )
+
+        self.actions_row = ft.Row(
+            [self.btn_download],
+            spacing=12,
+        )
+
+        card_content = ft.Column(
+            [
+                header_row,
+                ft.Divider(color=COLOR_BORDER, height=1),
+                desc_text,
+                info_box,
+                self.prompt_text,
+                self.status_label,
+                self.progress_bar,
+                self.detail_label,
+                self.actions_row,
+            ],
+            spacing=14,
+        )
+
+        super().__init__(
+            content=card_content,
+            bgcolor=COLOR_SURFACE_LIGHT,
+            border=ft.Border.all(width=1, color=COLOR_BORDER),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.all(24),
+            width=700,
+            alignment=ft.Alignment.CENTER,
+        )
+
+    def _safe_update(self):
+        """Thread-safe update helper."""
+        if self.target_page:
+            with self._ui_lock:
+                try:
+                    self.target_page.update()
+                except Exception:
+                    pass
+
+    def _on_download_click(self, e):
+        """Triggers the FFmpeg download in a background thread."""
+        if self.is_downloading:
+            return
+
+        self.is_downloading = True
+        self.actions_row.visible = False
+        self.progress_bar.visible = True
+        self.progress_bar.value = 0.0
+        self.detail_label.visible = True
+        self.status_label.value = "INITIALIZING DOWNLOAD..."
+        self.status_label.color = COLOR_ACCENT
+        self.detail_label.value = "CONNECTING TO REPOSITORY..."
+        self._safe_update()
+
+        threading.Thread(target=self._download_thread, daemon=True).start()
+
+    def _download_thread(self):
+        """Worker thread executing download and reporting progress to the UI."""
+        def _on_progress(ratio: Optional[float], message: str):
+            if ratio is not None:
+                self.progress_bar.value = ratio
+                pct = int(ratio * 100)
+                self.status_label.value = f"DOWNLOADING FFMPEG // {pct}%"
+            else:
+                self.progress_bar.value = None
+                self.status_label.value = "DOWNLOADING FFMPEG..."
+            self.detail_label.value = message.upper()
+            self._safe_update()
+
+        try:
+            final_bin = download_ffmpeg(
+                target_dir=self.target_dir,
+                on_progress=_on_progress,
+            )
+            self.progress_bar.value = 1.0
+            self.status_label.value = "FFMPEG CONFIGURED & VERIFIED SUCCESSFULLY"
+            self.status_label.color = COLOR_ACCENT
+            self.detail_label.value = "LAUNCHING APPLICATION..."
+            self._safe_update()
+            time.sleep(0.4)
+            self.on_success(final_bin)
+        except Exception as ex:
+            self.is_downloading = False
+            self.progress_bar.visible = False
+            self.status_label.value = "DOWNLOAD FAILED"
+            self.status_label.color = COLOR_RED
+            self.detail_label.value = f"ERROR: {str(ex).upper()}"
+            self.detail_label.color = COLOR_RED
+            self.btn_download_text.value = "RETRY DOWNLOAD"
+            self.actions_row.visible = True
+            self._safe_update()
+
+
 class SlowVerbApp:
     """Core GUI and state controller for SlowVerb Studio."""
 
-    def __init__(self, page: Optional[ft.Page] = None):
+    def __init__(self, page: Optional[ft.Page] = None, ffmpeg_path: Optional[str] = None):
         self.page = page
-        self.engine = AudioEngine()
-        self.player = AudioPlayer(on_playback_finished=self._on_playback_end)
+        self.ffmpeg_path: Optional[str] = ffmpeg_path or find_ffmpeg()
+        self.engine: Optional[AudioEngine] = None
+        self.player: Optional[AudioPlayer] = None
 
         # State
         self.current_filepath: Optional[str] = None
@@ -139,16 +401,26 @@ class SlowVerbApp:
         self._playback_poll_active = False
         self._playback_poller_id = 0
         self._ui_lock = threading.Lock()
+        self._pending_cli_file: Optional[str] = None
+        self.ffmpeg_setup_view: Optional[FFmpegSetupView] = None
 
         # Status tracking for rendered audio buffer
         self._rendered_effects: Optional[AudioEffects] = None
         self._rendered_is_preview: bool = False
 
-        # Build controls
-        self._init_controls()
-
-        if self.page:
-            self._setup_page()
+        if self.ffmpeg_path:
+            self.engine = AudioEngine(self.ffmpeg_path)
+            self.player = AudioPlayer(on_playback_finished=self._on_playback_end)
+            self._init_controls()
+            if self.page:
+                self._setup_page()
+        else:
+            if self.page:
+                self._setup_ffmpeg_page()
+            else:
+                self.engine = AudioEngine(auto_ensure=True)
+                self.player = AudioPlayer(on_playback_finished=self._on_playback_end)
+                self._init_controls()
 
     def update_ui(self):
         """Thread-safe UI update wrapper ensuring no concurrent Page.update calls."""
@@ -212,6 +484,75 @@ class SlowVerbApp:
             alt_track = os.path.abspath("eien - melancholys.opus")
             if os.path.isfile(alt_track):
                 self.load_file(alt_track)
+
+    def _setup_ffmpeg_page(self):
+        """Configures window and mounts the FFmpeg setup view when FFmpeg is missing."""
+        self.page.title = f"{APP_NAME} // FFMPEG SETUP"
+        self.page.bgcolor = COLOR_BG
+        self.page.padding = 24
+        self.page.scroll = ft.ScrollMode.AUTO
+
+        self.page.fonts = {
+            FONT_AWESOME_FONT: "fonts/fa-solid-900.ttf",
+        }
+
+        if hasattr(self.page, "window") and self.page.window:
+            try:
+                self.page.window.width = 850
+                self.page.window.height = 620
+                self.page.window.min_width = 750
+                self.page.window.min_height = 550
+            except Exception:
+                pass
+
+        self.ffmpeg_setup_view = FFmpegSetupView(
+            page=self.page,
+            on_success=self._on_ffmpeg_installed,
+            on_cancel=self._on_ffmpeg_cancelled,
+        )
+
+        center_wrapper = ft.Container(
+            content=self.ffmpeg_setup_view,
+            alignment=ft.Alignment.CENTER,
+            expand=True,
+            padding=ft.Padding.only(top=30),
+        )
+        self.page.add(center_wrapper)
+        self.page.update()
+
+    def _on_ffmpeg_installed(self, binary_path: str):
+        """Called once FFmpeg has been downloaded, extracted, and verified."""
+        self.ffmpeg_path = binary_path
+        self.engine = AudioEngine(self.ffmpeg_path)
+        self.player = AudioPlayer(on_playback_finished=self._on_playback_end)
+        self._init_controls()
+
+        if self.page:
+            if hasattr(self.page, "clean"):
+                self.page.clean()
+            else:
+                self.page.controls.clear()
+
+            self._setup_page()
+
+            if self._pending_cli_file:
+                cli_path = self._pending_cli_file
+                self._pending_cli_file = None
+                self.load_file(cli_path)
+
+    def _on_ffmpeg_cancelled(self):
+        """Called when user declines FFmpeg setup."""
+        if self.page:
+            if hasattr(self.page, "window") and self.page.window and hasattr(self.page.window, "close"):
+                try:
+                    self.page.window.close()
+                except Exception:
+                    pass
+            elif hasattr(self.page, "window_destroy"):
+                try:
+                    self.page.window_destroy()
+                except Exception:
+                    pass
 
     def _init_controls(self):
         """Initializes all interactive UI controls."""
@@ -729,6 +1070,10 @@ class SlowVerbApp:
 
     def load_file(self, filepath: str):
         """Loads an audio file, probes metadata, extracts waveform, and prepares player."""
+        if not self.engine:
+            self._pending_cli_file = filepath
+            return
+
         if not filepath or not os.path.isfile(filepath):
             self.set_status(f"ERROR: FILE NOT FOUND '{filepath}'", is_error=True)
             return
@@ -1197,9 +1542,10 @@ class SlowVerbApp:
 
     def set_status(self, message: str, is_error: bool = False):
         """Updates the status footer banner."""
-        self.status_banner.value = f">> {message.upper()}"
-        self.status_banner.color = COLOR_RED if is_error else COLOR_ACCENT
-        self.update_ui()
+        if hasattr(self, "status_banner") and self.status_banner:
+            self.status_banner.value = f">> {message.upper()}"
+            self.status_banner.color = COLOR_RED if is_error else COLOR_ACCENT
+            self.update_ui()
 
     def _effects_match(self, eff1: Optional[AudioEffects], eff2: Optional[AudioEffects]) -> bool:
         """Checks if two AudioEffects parameter sets have identical values."""

@@ -82,10 +82,10 @@ sloverb_studio/
    - Inspects standard OS directories (Windows WinGet/Chocolatey/Scoop/Program Files, macOS Homebrew, Linux `/usr/bin`).
 2. **Local Application Discovery**:
    - Checks `<project_root>/ffmpeg/ffmpeg.exe` (or `ffmpeg`).
-3. **Architecture-Aware Downloader**:
+3. **Architecture-Aware Downloader & Flet GUI Setup**:
    - Normalizes platform (`windows`, `darwin`, `linux`) and architecture (`x86_64`, `arm64`).
-   - If FFmpeg is missing everywhere, prompts the user (`prompt_and_ensure_ffmpeg`).
-   - If confirmed, streams the official static build from GitHub releases / Gyan / Evermeet / JohnVanSickle into `<project_root>/ffmpeg/` and sets executable bits.
+   - If FFmpeg is missing everywhere, prompts the user inside a cyber/robotic Flet window (`FFmpegSetupView`) with `[DOWNLOAD & CONFIGURE FFMPEG]` and real-time progress bar (`ft.ProgressBar`).
+   - If confirmed, streams the official static build from GitHub releases / Gyan / Evermeet / JohnVanSickle into `<project_root>/ffmpeg/`, displays download/extraction progress, sets executable bits, and seamlessly transitions to the main editor interface.
 
 ### 4.2. Audio DSP Engine (`slowverb/engine.py`)
 - **Speed & Pitch**: Implemented via FFmpeg's `rubberband` filter (`rubberband=tempo=...:pitch=...`). Allows decoupled or turntable-linked pitch adjustments.

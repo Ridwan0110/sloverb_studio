@@ -14,6 +14,7 @@ from slowverb.engine import (
     WaveformData,
 )
 from slowverb.player import AudioPlayer
+from slowverb.ui import FFmpegSetupView, SlowVerbApp
 
 __all__ = [
     "AudioEngine",
@@ -26,4 +27,6 @@ __all__ = [
     "PRESET_NIGHTCORE",
     "PRESET_DEFAULT",
     "get_ffmpeg_path",
+    "FFmpegSetupView",
+    "SlowVerbApp",
 ]

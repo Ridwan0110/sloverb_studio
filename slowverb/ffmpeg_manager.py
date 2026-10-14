@@ -17,7 +17,7 @@ import tarfile
 import tempfile
 import urllib.request
 import zipfile
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Official static builds from yt-dlp / gyan.dev / evermeet
 FFMPEG_DOWNLOAD_URLS: Dict[Tuple[str, str], List[str]] = {
@@ -290,6 +290,90 @@ def download_ffmpeg(
     )
 
 
+def run_ffmpeg_setup_flet(project_root: Optional[str] = None) -> str:
+    """
+    Launches a dedicated Flet window to prompt the user and show download progress.
+    Returns the absolute path to the verified FFmpeg binary.
+    """
+    import flet as ft
+    from slowverb.ui import FFmpegSetupView
+
+    download_result: Dict[str, Any] = {"path": None, "cancelled": False, "error": None}
+
+    def main_setup(page: ft.Page):
+        page.title = "SloVerb Studio // FFmpeg Setup"
+        page.bgcolor = "#0D0E12"
+        page.padding = 24
+        page.scroll = ft.ScrollMode.AUTO
+
+        page.fonts = {
+            "FontAwesome": "fonts/fa-solid-900.ttf",
+        }
+
+        if hasattr(page, "window") and page.window:
+            try:
+                page.window.width = 850
+                page.window.height = 620
+                page.window.min_width = 750
+                page.window.min_height = 550
+            except Exception:
+                pass
+
+        def on_success(binary_path: str):
+            download_result["path"] = binary_path
+            if hasattr(page, "window") and page.window and hasattr(page.window, "close"):
+                try:
+                    page.window.close()
+                except Exception:
+                    pass
+            elif hasattr(page, "window_destroy"):
+                try:
+                    page.window_destroy()
+                except Exception:
+                    pass
+
+        def on_cancel():
+            download_result["cancelled"] = True
+            if hasattr(page, "window") and page.window and hasattr(page.window, "close"):
+                try:
+                    page.window.close()
+                except Exception:
+                    pass
+            elif hasattr(page, "window_destroy"):
+                try:
+                    page.window_destroy()
+                except Exception:
+                    pass
+
+        target_dir = os.path.join(project_root or get_project_root(), "ffmpeg")
+        setup_view = FFmpegSetupView(
+            page=page,
+            on_success=on_success,
+            on_cancel=on_cancel,
+            target_dir=target_dir,
+        )
+        center_wrapper = ft.Container(
+            content=setup_view,
+            alignment=ft.Alignment.CENTER,
+            expand=True,
+            padding=ft.Padding.only(top=30),
+        )
+        page.add(center_wrapper)
+        page.update()
+
+    if hasattr(ft, "run"):
+        ft.run(main_setup)
+    elif hasattr(ft, "app"):
+        ft.app(target=main_setup)
+
+    if download_result["path"]:
+        return download_result["path"]
+
+    raise FileNotFoundError(
+        "FFmpeg is required for SloVerb Studio audio processing, but was not found or setup was cancelled."
+    )
+
+
 def prompt_and_ensure_ffmpeg(
     interactive: bool = True,
     prompt_callback: Optional[Callable[[], bool]] = None,
@@ -298,30 +382,43 @@ def prompt_and_ensure_ffmpeg(
 ) -> str:
     """
     Locates FFmpeg or prompts the user to download it if missing.
+    In GUI / interactive mode, prompts via a Flet window and displays download progress there.
     Raises FileNotFoundError if FFmpeg cannot be found and user declines download.
     """
     existing_path = find_ffmpeg(project_root)
     if existing_path:
         return existing_path
 
-    # User prompt logic
-    user_agreed = False
+    # User callback override (e.g. for unit testing)
     if prompt_callback is not None:
         user_agreed = prompt_callback()
-    elif interactive:
-        print("\n" + "=" * 65)
-        print(">> FFmpeg was not detected on your system PATH or local folder.")
-        print(">> SloVerb Studio requires FFmpeg to process and export audio.")
-        print("=" * 65)
-        try:
-            choice = input(">> Would you like to download FFmpeg automatically now? [Y/n]: ").strip().lower()
-            user_agreed = choice in ("", "y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            user_agreed = False
+        if user_agreed:
+            target_dir = os.path.join(project_root or get_project_root(), "ffmpeg")
+            return download_ffmpeg(target_dir=target_dir, on_progress=on_progress)
+        raise FileNotFoundError(
+            "FFmpeg is required for SloVerb Studio audio processing, but was not found. "
+            "Please install FFmpeg OS-wide or place the ffmpeg binary inside the ./ffmpeg/ folder."
+        )
 
-    if user_agreed:
-        target_dir = os.path.join(project_root or get_project_root(), "ffmpeg")
-        return download_ffmpeg(target_dir=target_dir, on_progress=on_progress)
+    if interactive:
+        try:
+            return run_ffmpeg_setup_flet(project_root=project_root)
+        except Exception as e:
+            # Fall back to terminal prompt only if Flet GUI cannot run (e.g. headless environment)
+            print(f">> Note: Flet GUI setup unavailable ({e}), falling back to terminal...")
+            print("\n" + "=" * 65)
+            print(">> FFmpeg was not detected on your system PATH or local folder.")
+            print(">> SloVerb Studio requires FFmpeg to process and export audio.")
+            print("=" * 65)
+            try:
+                choice = input(">> Would you like to download FFmpeg automatically now? [Y/n]: ").strip().lower()
+                user_agreed = choice in ("", "y", "yes")
+            except (EOFError, KeyboardInterrupt):
+                user_agreed = False
+
+            if user_agreed:
+                target_dir = os.path.join(project_root or get_project_root(), "ffmpeg")
+                return download_ffmpeg(target_dir=target_dir, on_progress=on_progress)
 
     raise FileNotFoundError(
         "FFmpeg is required for SloVerb Studio audio processing, but was not found. "
