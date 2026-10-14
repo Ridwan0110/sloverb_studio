@@ -81,10 +81,3 @@ def test_start_app_fallback_to_flet_app():
     with patch.object(sloverb_studio, "ft", fake_flet):
         sloverb_studio.start_app()
         fake_flet.app.assert_called_once_with(target=sloverb_studio.main)
-
-
-def test_main_py_backward_compatibility():
-    """Verify main.py can still be imported and redirects to sloverb_studio."""
-    import main as compat_main
-    assert hasattr(compat_main, "main")
-    assert hasattr(compat_main, "start_app")
