@@ -1,3 +1,27 @@
+## Version: v0.2.0
+
+Release v0.2.0 introduces universal cross-platform release packaging for Windows, Linux, and macOS, real-time dynamic playback UI updates via an asynchronous event-loop poller, clean application startup without default demo track loading, and configuration variable documentation.
+
+## Added
+- Cross-platform standalone binary packaging pipeline supporting Windows, Linux, and macOS with compressed distribution archives (feature)
+- Automated GitHub Actions release build workflow for compiling multi-platform release assets (feature)
+- Asynchronous playback poller utilizing the Flet page event loop for dynamic waveform, peak meter, and duration updates (feature)
+- Formal application configuration and environment variable documentation (misc)
+- Test suites covering universal binary packaging, archive creation, and thread-safe UI event-loop dispatching (improvement)
+
+## Changed
+- Replaced Windows-only packaging script with cross-platform build packager (improvement)
+- Configured macOS CI and release workflows to install ffmpeg-full with Rubberband support (improvement)
+- Updated development dependencies manifest to support cross-platform builds and testing (improvement)
+
+## Fixed
+- Resolved UI update stalls and race conditions during preview playback through thread-safe event loop dispatching (bug)
+- Corrected CI workflow status badge link in project documentation (bug)
+
+## Removed
+- Automatic startup loading of hardcoded default audio track (improvement)
+- Legacy Windows-only executable packaging script (misc)
+
 ## Version: v0.1.0
 
 Initial release of SloVerb Studio, a high-performance, minimalist desktop audio editing application designed for creating slowed and reverb, nightcore, pitch-shifted, and bass-boosted audio tracks. Features real-time audio playback with waveform peeking, in-app FFmpeg configuration, and standalone Windows binary distribution.
