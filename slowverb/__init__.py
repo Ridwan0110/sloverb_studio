@@ -1,6 +1,6 @@
 """SlowVerb Studio audio package."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from slowverb.config import (
     APP_NAME,
