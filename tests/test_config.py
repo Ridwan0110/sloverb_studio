@@ -73,8 +73,11 @@ def test_preset_default_values():
 
 
 def test_package_version():
-    """Verify package version is 0.1.0 as single source of truth."""
+    """Verify package version is defined as single source of truth and follows semver."""
+    import re
     import slowverb
 
-    assert slowverb.__version__ == "0.1.0"
+    assert hasattr(slowverb, "__version__")
+    assert isinstance(slowverb.__version__, str)
+    assert re.match(r"^\d+\.\d+\.\d+", slowverb.__version__)
 

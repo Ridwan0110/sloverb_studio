@@ -215,7 +215,9 @@ def test_section_titles_and_badges():
     codec_idx = right_header_controls.index(app.format_badge_text)
     version_idx = right_header_controls.index(app.version_badge_text)
     assert version_idx == codec_idx + 1
-    assert "0.1.0" in app.version_badge_text.value
+    import slowverb
+    assert app.version == slowverb.__version__
+    assert f"v{slowverb.__version__}" == app.version_badge_text.value
 
     # 2. Waveform Card: Left -> "PEEK", Right -> None
     wave_header_row = waveform_card.content.controls[0]
