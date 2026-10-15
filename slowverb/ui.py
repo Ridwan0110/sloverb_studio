@@ -479,14 +479,6 @@ class SlowVerbApp:
         self.page.add(self.build_ui())
         self.page.update()
 
-        # Check for default track in cwd
-        default_track = os.path.abspath("eien - melancholy.opus")
-        if os.path.isfile(default_track):
-            self.load_file(default_track)
-        else:
-            alt_track = os.path.abspath("eien - melancholys.opus")
-            if os.path.isfile(alt_track):
-                self.load_file(alt_track)
 
     def _setup_ffmpeg_page(self):
         """Configures window and mounts the FFmpeg setup view when FFmpeg is missing."""

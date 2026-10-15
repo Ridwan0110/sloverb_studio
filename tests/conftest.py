@@ -40,15 +40,6 @@ def sample_sine_audio(tmp_path_factory, ffmpeg_bin):
     return file_path
 
 
-@pytest.fixture(scope="session")
-def real_track_path():
-    """Path to the user provided track 'eien - melancholy.opus'."""
-    p = os.path.abspath("eien - melancholy.opus")
-    if os.path.isfile(p):
-        return p
-    return None
-
-
 @pytest.fixture
 def engine(ffmpeg_bin):
     """Initialized AudioEngine instance."""
