@@ -1,5 +1,6 @@
 """Desktop GUI for SlowVerb Studio using Flet with minimalistic square/robotic styling."""
 
+import asyncio
 import os
 import platform
 import threading
@@ -314,13 +315,35 @@ class FFmpegSetupView(ft.Container):
         )
 
     def _safe_update(self):
-        """Thread-safe update helper."""
-        if self.target_page:
-            with self._ui_lock:
+        """Thread-safe update helper ensuring updates are executed on the Page's event loop."""
+        if not self.target_page:
+            return
+        try:
+            loop = getattr(self.target_page, "loop", None)
+            if loop and loop.is_running() and not loop.is_closed():
                 try:
+                    running_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    running_loop = None
+
+                if running_loop is loop:
+                    with self._ui_lock:
+                        self.target_page.update()
+                else:
+                    loop.call_soon_threadsafe(self._safe_target_page_update)
+            else:
+                with self._ui_lock:
                     self.target_page.update()
-                except Exception:
-                    pass
+        except Exception:
+            pass
+
+    def _safe_target_page_update(self):
+        with self._ui_lock:
+            try:
+                if self.target_page:
+                    self.target_page.update()
+            except Exception:
+                pass
 
     def _on_download_click(self, e):
         """Triggers the FFmpeg download in a background thread."""
@@ -411,6 +434,8 @@ class SlowVerbApp:
         self._rendered_effects: Optional[AudioEffects] = None
         self._rendered_is_preview: bool = False
 
+        self._update_pending = False
+
         if self.ffmpeg_path:
             self.engine = AudioEngine(self.ffmpeg_path)
             self.player = AudioPlayer(on_playback_finished=self._on_playback_end)
@@ -426,13 +451,40 @@ class SlowVerbApp:
                 self._init_controls()
 
     def update_ui(self):
-        """Thread-safe UI update wrapper ensuring no concurrent Page.update calls."""
-        if self.page:
-            with self._ui_lock:
+        """Thread-safe UI update wrapper ensuring updates are executed on the Page's event loop."""
+        if not self.page:
+            return
+        try:
+            loop = getattr(self.page, "loop", None)
+            if loop and loop.is_running() and not loop.is_closed():
                 try:
+                    running_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    running_loop = None
+
+                if running_loop is loop:
+                    self._update_pending = False
+                    with self._ui_lock:
+                        self.page.update()
+                else:
+                    if not self._update_pending:
+                        self._update_pending = True
+                        loop.call_soon_threadsafe(self._scheduled_page_update)
+            else:
+                with self._ui_lock:
                     self.page.update()
-                except Exception:
-                    pass
+        except Exception:
+            pass
+
+    def _scheduled_page_update(self):
+        """Dispatches page.update() inside the UI lock on the event loop."""
+        self._update_pending = False
+        with self._ui_lock:
+            try:
+                if self.page:
+                    self.page.update()
+            except Exception:
+                pass
 
     def _on_page_resize(self, e):
         """Updates estimated waveform container width when page is resized."""
@@ -1132,19 +1184,22 @@ class SlowVerbApp:
         peaks = self.waveform.peaks
         if not peaks:
             for bar in self.wave_bar_containers:
-                bar.height = 6
-                bar.bgcolor = COLOR_WAVE_UNPLAYED
+                if bar.height != 6:
+                    bar.height = 6
+                if bar.bgcolor != COLOR_WAVE_UNPLAYED:
+                    bar.bgcolor = COLOR_WAVE_UNPLAYED
             return
 
         active_index = int(playhead_ratio * (len(self.wave_bar_containers) - 1))
         for i, bar in enumerate(self.wave_bar_containers):
             peak = peaks[i] if i < len(peaks) else 0.0
             # Scale height from min 6px to max 88px
-            bar.height = max(6, int(peak * 88))
-            if i <= active_index:
-                bar.bgcolor = COLOR_WAVE_PLAYED
-            else:
-                bar.bgcolor = COLOR_WAVE_UNPLAYED
+            expected_h = max(6, int(peak * 88))
+            if bar.height != expected_h:
+                bar.height = expected_h
+            expected_bg = COLOR_WAVE_PLAYED if i <= active_index else COLOR_WAVE_UNPLAYED
+            if bar.bgcolor != expected_bg:
+                bar.bgcolor = expected_bg
 
     def _extract_local_x(self, e) -> Optional[float]:
         """Extracts local horizontal position from Flet tap or drag event."""
@@ -1256,6 +1311,8 @@ class SlowVerbApp:
     def pause(self):
         """Pauses playback."""
         self.player.pause()
+        self._playback_poller_id += 1
+        self._playback_poll_active = False
         self.set_status("PAUSED")
         self._update_version_indicator()
         self.update_ui()
@@ -1263,6 +1320,8 @@ class SlowVerbApp:
     def stop(self):
         """Stops playback and rewinds to beginning."""
         self.player.stop()
+        self._playback_poller_id += 1
+        self._playback_poll_active = False
         self.seek(0.0)
         self.set_status("STOPPED")
         self._update_version_indicator()
@@ -1272,37 +1331,66 @@ class SlowVerbApp:
         """Callback when audio completes playback."""
         self.stop()
 
+    def _update_playback_tick(self):
+        """Updates waveform playhead, time display, and peak display for current playback position."""
+        if not self.player:
+            return
+        cur_t = self.player.get_current_time()
+        tot_t = self._get_active_duration()
+        if tot_t > 0:
+            ratio = cur_t / tot_t
+            self._update_waveform_bars(ratio)
+            cur_m = int(cur_t // 60)
+            cur_s = cur_t % 60
+            tot_m = int(tot_t // 60)
+            tot_s = tot_t % 60
+            new_time_str = f"{cur_m:02d}:{cur_s:04.1f} / {tot_m:02d}:{tot_s:04.1f}"
+            if self.time_display_text.value != new_time_str:
+                self.time_display_text.value = new_time_str
+
+            # Keep Peak Display updated dynamically during playback
+            if self.waveform and self.waveform.peaks:
+                peak_val = self.waveform.get_peak_at_time(cur_t)
+                peak_db = self.waveform.get_peak_db_at_time(cur_t)
+                new_peak_str = f"PEAK: {peak_db} dB ({int(peak_val * 100)}%)"
+                if self.peak_display_text.value != new_peak_str:
+                    self.peak_display_text.value = new_peak_str
+
+            self.update_ui()
+
     def _start_playback_poller(self):
-        """Background thread updating waveform playhead, peak readout, and time display smoothly."""
+        """Launches playback poller to dynamically update playhead, peak readout, and time display."""
         self._playback_poller_id += 1
         current_id = self._playback_poller_id
         self._playback_poll_active = True
 
-        def poller(poller_id: int):
-            while self._playback_poller_id == poller_id and self.player.is_playing():
-                cur_t = self.player.get_current_time()
-                tot_t = self._get_active_duration()
-                if tot_t > 0:
-                    ratio = cur_t / tot_t
-                    self._update_waveform_bars(ratio)
-                    cur_m = int(cur_t // 60)
-                    cur_s = cur_t % 60
-                    tot_m = int(tot_t // 60)
-                    tot_s = tot_t % 60
-                    self.time_display_text.value = f"{cur_m:02d}:{cur_s:04.1f} / {tot_m:02d}:{tot_s:04.1f}"
+        loop = getattr(self.page, "loop", None) if self.page else None
+        if self.page and hasattr(self.page, "run_task") and loop and loop.is_running() and not loop.is_closed():
+            self.page.run_task(self._async_playback_poller, current_id)
+        else:
+            threading.Thread(target=self._thread_playback_poller, args=(current_id,), daemon=True).start()
 
-                    # Keep Peak Display updated dynamically during playback
-                    if self.waveform and self.waveform.peaks:
-                        peak_val = self.waveform.get_peak_at_time(cur_t)
-                        peak_db = self.waveform.get_peak_db_at_time(cur_t)
-                        self.peak_display_text.value = f"PEAK: {peak_db} dB ({int(peak_val * 100)}%)"
+    async def _async_playback_poller(self, poller_id: int):
+        """Asynchronous playback poller executing directly on the Page event loop."""
+        while self._playback_poller_id == poller_id and self.player and self.player.is_playing():
+            try:
+                self._update_playback_tick()
+            except Exception:
+                pass
+            await asyncio.sleep(0.05)
+        if self._playback_poller_id == poller_id:
+            self._playback_poll_active = False
 
-                    self.update_ui()
-                time.sleep(0.05)
-            if self._playback_poller_id == poller_id:
-                self._playback_poll_active = False
-
-        threading.Thread(target=poller, args=(current_id,), daemon=True).start()
+    def _thread_playback_poller(self, poller_id: int):
+        """Fallback thread poller for headless/mock environments."""
+        while self._playback_poller_id == poller_id and self.player and self.player.is_playing():
+            try:
+                self._update_playback_tick()
+            except Exception:
+                pass
+            time.sleep(0.05)
+        if self._playback_poller_id == poller_id:
+            self._playback_poll_active = False
 
     # --- Effect Parameter Handlers ---
 
@@ -1637,5 +1725,6 @@ class SlowVerbApp:
     def close(self):
         """Cleanly releases audio player streams and background pollers."""
         self._playback_poll_active = False
+        self._playback_poller_id += 1
         if self.player:
             self.player.close()
