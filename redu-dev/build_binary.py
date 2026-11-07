@@ -256,7 +256,7 @@ def run_build(args: argparse.Namespace) -> int:
     try:
         from slowverb import __version__ as app_version
     except Exception:
-        app_version = "0.1.0"
+        app_version = "UNKNOWN"
     print(f"Application Ver : v{app_version}")
 
     dist_dir = (repo_root / args.distpath).resolve()
