@@ -3,8 +3,16 @@
 import os
 import flet as ft
 import pytest
-from slowverb.config import PRESET_DEFAULT, PRESET_NIGHTCORE, PRESET_SLOWED_REVERB
-from slowverb.ui import SlowVerbApp
+from slowverb.config import (
+    COLOR_ACCENT,
+    COLOR_RED,
+    FA_CHECK,
+    FA_COPY,
+    PRESET_DEFAULT,
+    PRESET_NIGHTCORE,
+    PRESET_SLOWED_REVERB,
+)
+from slowverb.ui import SlowVerbApp, copy_to_clipboard
 
 
 def test_gui_initial_controls_state(app):
@@ -192,7 +200,10 @@ def test_status_bar_position_below_file_picker():
     controls = ui_column.controls
     # controls[0] is header_row, controls[1] is loader_bar, controls[2] is status_bar
     status_container = controls[2]
-    assert app.status_banner in status_container.content.controls
+    assert (
+        app.status_banner in status_container.content.controls
+        or any(app.status_banner in getattr(c, "controls", []) for c in status_container.content.controls)
+    )
     app.close()
 
 
@@ -513,3 +524,82 @@ def test_poller_race_condition_resolution(app, sample_sine_audio):
     app.close()
 
 
+
+
+def test_copy_button_initial_state_and_geometry():
+    """Verify Copy button initial hidden state, square geometry, and typography."""
+    app = SlowVerbApp()
+    app.build_ui()
+
+    assert app.copy_error_button.visible is False
+    assert app.status_error_row.visible is False
+    assert app._last_error is None
+    assert app.copy_error_btn_text.value == "COPY"
+    assert app.copy_error_btn_icon.value == FA_COPY
+    assert app.copy_error_button.border_radius.top_left == 2
+    assert app.copy_error_button.border_radius.bottom_right == 2
+    assert app.copy_error_btn_text.font_family == "Consolas"
+    assert app.copy_error_btn_icon.font_family == "FontAwesome"
+    app.close()
+
+
+def test_copy_button_visibility_on_error_and_reset():
+    """Verify Copy button appears when error is thrown and hides when non-error status is set."""
+    app = SlowVerbApp()
+    app.build_ui()
+
+    # Trigger error
+    error_msg = "FFmpeg export failed with error:\nInvalid sample rate\nExit code 1"
+    app.set_status(error_msg, is_error=True)
+
+    assert app.copy_error_button.visible is True
+    assert app.status_error_row.visible is True
+    assert app._last_error == error_msg
+    assert "FFMPEG EXPORT FAILED" in app.status_banner.value
+    assert app.status_banner.color == COLOR_RED
+
+    # Clear error by setting normal status
+    app.set_status("STOPPED", is_error=False)
+    assert app.copy_error_button.visible is False
+    assert app.status_error_row.visible is False
+    assert app._last_error is None
+    assert "STOPPED" in app.status_banner.value
+    assert app.status_banner.color == COLOR_ACCENT
+
+    app.close()
+
+
+def test_copy_button_click_and_clipboard_flow():
+    """Verify clicking Copy copies error to clipboard and provides visual feedback."""
+    from unittest.mock import patch
+
+    app = SlowVerbApp()
+    app.build_ui()
+
+    error_text = "FAILED TO RENDER BUFFER: Invalid audio format\n[libopus] Internal error"
+    app.set_status(error_text, is_error=True)
+
+    with patch("slowverb.ui.copy_to_clipboard") as mock_copy:
+        app._on_copy_error_clicked()
+        mock_copy.assert_called_once_with(error_text, page=app.page)
+
+        # Check visual feedback
+        assert app.copy_error_btn_text.value == "COPIED!"
+        assert app.copy_error_btn_icon.value == FA_CHECK
+        assert app.copy_error_btn_text.color == COLOR_ACCENT
+        assert app.copy_error_btn_icon.color == COLOR_ACCENT
+
+        # Reset feedback
+        app._set_copy_button_feedback(copied=False)
+        assert app.copy_error_btn_text.value == "COPY"
+        assert app.copy_error_btn_icon.value == FA_COPY
+        assert app.copy_error_btn_text.color == COLOR_RED
+        assert app.copy_error_btn_icon.color == COLOR_RED
+
+    app.close()
+
+
+def test_copy_to_clipboard_helper():
+    """Verify copy_to_clipboard executes without error."""
+    result = copy_to_clipboard("Test error clipboard message", page=None)
+    assert isinstance(result, bool)

@@ -104,6 +104,8 @@ FA_MUSIC = "\uf001"         # Music note / preview
 FA_UNDO = "\uf0e2"          # Reset / undo action
 FA_SLIDERS = "\uf1de"       # Equalizer / filter sliders
 FA_SCISSORS = "\uf0c4"      # Trim start / end scissors
+FA_COPY = "\uf0c5"          # Copy to clipboard
+
 ```
 
 ---

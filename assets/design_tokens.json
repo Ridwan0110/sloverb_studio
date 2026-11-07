@@ -94,7 +94,8 @@
     "music": "\\uf001",
     "undo": "\\uf0e2",
     "sliders": "\\uf1de",
-    "scissors": "\\uf0c4"
+    "scissors": "\\uf0c4",
+    "copy": "\\uf0c5"
   },
   "rules": {
     "no_emojis": true,

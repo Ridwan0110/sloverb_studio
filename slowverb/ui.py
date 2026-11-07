@@ -30,6 +30,7 @@ from slowverb.config import (
     DEFAULT_SPEED,
     FA_BOLT,
     FA_CHECK,
+    FA_COPY,
     FA_EXPORT,
     FA_FOLDER_OPEN,
     FA_MAGIC,
@@ -115,6 +116,43 @@ def save_file_desktop(initial_filename: str, ext: str, initial_dir: Optional[str
     except Exception as e:
         print(f"Save dialog error: {e}")
         return None
+
+
+def copy_to_clipboard(text: str, page: Optional[ft.Page] = None) -> bool:
+    """Copies text to the system clipboard using tkinter and Flet services fallback."""
+    copied = False
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+        root.destroy()
+        copied = True
+    except Exception:
+        pass
+
+    if page:
+        try:
+            clip_service = None
+            if hasattr(page, "services") and page.services:
+                for s in page.services:
+                    if isinstance(s, ft.Clipboard):
+                        clip_service = s
+                        break
+            if not clip_service:
+                clip_service = ft.Clipboard()
+                if hasattr(page, "services"):
+                    page.services.append(clip_service)
+            if hasattr(page, "run_task"):
+                page.run_task(clip_service.set, text)
+            copied = True
+        except Exception:
+            pass
+
+    return copied
+
 
 
 from slowverb.ffmpeg_manager import (
@@ -433,6 +471,8 @@ class SlowVerbApp:
         # Status tracking for rendered audio buffer
         self._rendered_effects: Optional[AudioEffects] = None
         self._rendered_is_preview: bool = False
+        self._last_error: Optional[str] = None
+        self._copy_feedback_token: int = 0
 
         self._update_pending = False
 
@@ -806,7 +846,43 @@ class SlowVerbApp:
             size=12,
             color=COLOR_TEXT_DIM,
             weight=ft.FontWeight.BOLD,
+            selectable=True,
+            expand=True,
         )
+
+        self.copy_error_btn_text = ft.Text(
+            "COPY",
+            font_family=ROBOTIC_FONT,
+            size=11,
+            weight=ft.FontWeight.BOLD,
+            color=COLOR_RED,
+            text_align=ft.TextAlign.CENTER,
+        )
+        self.copy_error_btn_icon = ft.Text(
+            FA_COPY,
+            font_family=FONT_AWESOME_FONT,
+            size=11,
+            color=COLOR_RED,
+        )
+        self.copy_error_button = ft.Container(
+            content=ft.Row([
+                self.copy_error_btn_icon,
+                self.copy_error_btn_text,
+            ], alignment=ft.MainAxisAlignment.CENTER, vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=6),
+            bgcolor=COLOR_SURFACE_LIGHT,
+            border=ft.Border.all(width=1, color=COLOR_RED),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+            alignment=ft.Alignment.CENTER,
+            on_click=lambda e: self._on_copy_error_clicked(),
+            ink=True,
+            tooltip="COPY ERROR TO CLIPBOARD",
+            visible=False,
+        )
+
+        self.status_error_row = ft.Row([
+            self.copy_error_button,
+        ], alignment=ft.MainAxisAlignment.START, visible=False)
 
         # Status indicator: shows whether playing current modified or old modified version
         self.version_indicator_icon = ft.Text(
@@ -944,11 +1020,16 @@ class SlowVerbApp:
         ], spacing=8)
 
         # Status Bar (positioned right below file loader section)
+        self.status_row = ft.Row([
+            self.status_banner,
+            self.version_indicator_container,
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
         status_bar = ft.Container(
-            content=ft.Row([
-                self.status_banner,
-                self.version_indicator_container,
-            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            content=ft.Column([
+                self.status_row,
+                self.status_error_row,
+            ], spacing=6),
             bgcolor=COLOR_SURFACE,
             border=ft.Border.all(width=1, color=COLOR_BORDER),
             border_radius=ft.BorderRadius.all(2),
@@ -1633,11 +1714,64 @@ class SlowVerbApp:
             return None
 
     def set_status(self, message: str, is_error: bool = False):
-        """Updates the status footer banner."""
+        """Updates the status footer banner and toggles copy error button."""
         if hasattr(self, "status_banner") and self.status_banner:
             self.status_banner.value = f">> {message.upper()}"
             self.status_banner.color = COLOR_RED if is_error else COLOR_ACCENT
-            self.update_ui()
+
+        if hasattr(self, "copy_error_button") and self.copy_error_button:
+            if is_error:
+                self._last_error = message
+                self.copy_error_button.visible = True
+                if hasattr(self, "status_error_row") and self.status_error_row:
+                    self.status_error_row.visible = True
+                self._set_copy_button_feedback(copied=False)
+            else:
+                self._last_error = None
+                self.copy_error_button.visible = False
+                if hasattr(self, "status_error_row") and self.status_error_row:
+                    self.status_error_row.visible = False
+
+        self.update_ui()
+
+    def _set_copy_button_feedback(self, copied: bool):
+        """Sets the copy error button visuals between standard and copied confirmation."""
+        if hasattr(self, "copy_error_btn_text") and self.copy_error_btn_text:
+            self.copy_error_btn_text.value = "COPIED!" if copied else "COPY"
+            self.copy_error_btn_text.color = COLOR_ACCENT if copied else COLOR_RED
+        if hasattr(self, "copy_error_btn_icon") and self.copy_error_btn_icon:
+            self.copy_error_btn_icon.value = FA_CHECK if copied else FA_COPY
+            self.copy_error_btn_icon.color = COLOR_ACCENT if copied else COLOR_RED
+        if hasattr(self, "copy_error_button") and self.copy_error_button:
+            self.copy_error_button.border = (
+                ft.Border.all(width=1, color=COLOR_ACCENT)
+                if copied
+                else ft.Border.all(width=1, color=COLOR_RED)
+            )
+
+    def _on_copy_error_clicked(self):
+        """Copies the active error message to the system clipboard and displays confirmation."""
+        text = self._last_error
+        if not text and hasattr(self, "status_banner") and self.status_banner:
+            val = self.status_banner.value or ""
+            text = val[3:] if val.startswith(">> ") else val
+        if not text:
+            return
+
+        copy_to_clipboard(text, page=self.page)
+        self._copy_feedback_token += 1
+        current_token = self._copy_feedback_token
+
+        self._set_copy_button_feedback(copied=True)
+        self.update_ui()
+
+        def revert():
+            time.sleep(2.0)
+            if self._copy_feedback_token == current_token and self._last_error:
+                self._set_copy_button_feedback(copied=False)
+                self.update_ui()
+
+        threading.Thread(target=revert, daemon=True).start()
 
     def _effects_match(self, eff1: Optional[AudioEffects], eff2: Optional[AudioEffects]) -> bool:
         """Checks if two AudioEffects parameter sets have identical values."""
@@ -1726,5 +1860,6 @@ class SlowVerbApp:
         """Cleanly releases audio player streams and background pollers."""
         self._playback_poll_active = False
         self._playback_poller_id += 1
+        self._copy_feedback_token += 1
         if self.player:
             self.player.close()
