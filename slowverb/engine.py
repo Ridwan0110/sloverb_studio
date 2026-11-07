@@ -470,19 +470,19 @@ class AudioEngine:
         # 3. Reverb (0% - 100%)
         if effects.reverb_percent > 0.01:
             w = max(0.01, min(1.0, effects.reverb_percent / 100.0))
-            # Multi-tap warm reverb reflection delays and decays
-            in_gain = max(0.68, 1.0 - 0.25 * w)
-            out_gain1 = min(0.85, 0.28 + 0.50 * w)
+
+            in_gain = max(0.68, 1.0 - (0.25 * w))
+            out_gain1 = min(0.85, 0.28 + (0.50 * w))
             out_gain2 = out_gain1 * 0.70
 
-            # Early reflections
+            # Early reflections with a 0.01 minimum floor
             d1 = "50|100|200|350"
-            decay1 = f"{0.50*w:.2f}|{0.38*w:.2f}|{0.28*w:.2f}|{0.18*w:.2f}"
+            decay1 = f"{max(0.01, 0.50 * w):.2f}|{max(0.01, 0.38 * w):.2f}|{max(0.01, 0.28 * w):.2f}|{max(0.01, 0.18 * w):.2f}"
             filters.append(f"aecho={in_gain:.2f}:{out_gain1:.2f}:{d1}:{decay1}")
 
-            # Late diffusion reflections
+            # Late diffusion reflections with a 0.01 minimum floor
             d2 = "70|150|300|600"
-            decay2 = f"{0.35*w:.2f}|{0.25*w:.2f}|{0.18*w:.2f}|{0.10*w:.2f}"
+            decay2 = f"{max(0.01, 0.35 * w):.2f}|{max(0.01, 0.25 * w):.2f}|{max(0.01, 0.18 * w):.2f}|{max(0.01, 0.10 * w):.2f}"
             filters.append(f"aecho={in_gain:.2f}:{out_gain2:.2f}:{d2}:{decay2}")
 
         # 4. Limiter to avoid clipping if effects pushed gain
