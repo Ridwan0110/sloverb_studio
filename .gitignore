@@ -182,7 +182,7 @@ cython_debug/
 .cursorindexingignore
 
 # redu-dev
-eien - melancholy.opus
+*.opus
 main.py
 ffmpeg/
 redu-dev/commit_history.json
