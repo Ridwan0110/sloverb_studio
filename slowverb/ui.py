@@ -5,7 +5,7 @@ import os
 import platform
 import threading
 import time
-from typing import Callable, Dict, Any, List, Optional, Tuple
+from typing import Callable, Any, Optional
 
 import flet as ft
 
@@ -33,7 +33,6 @@ from slowverb.config import (
     FA_COPY,
     FA_EXPORT,
     FA_FOLDER_OPEN,
-    FA_MAGIC,
     FA_MUSIC,
     FA_PAUSE,
     FA_PLAY,
