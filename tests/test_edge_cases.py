@@ -82,3 +82,39 @@ def test_corrupt_file_handling(engine, tmp_path):
     # Waveform extraction on corrupt file should fail gracefully with RuntimeError
     with pytest.raises(RuntimeError):
         engine.extract_waveform(corrupt_file)
+
+
+def test_unicode_filename_and_metadata_probing(engine, sample_sine_audio, tmp_path):
+    """Files with multi-byte Unicode characters (e.g. '｜', Japanese) probe and extract waveforms cleanly."""
+    unicode_filename = "Interlinked ｜ メモリー [2026].opus"
+    out_file = str(tmp_path / unicode_filename)
+
+    fx = AudioEffects(speed=1.0)
+    path, size = engine.export_audio(sample_sine_audio, out_file, fx)
+    assert os.path.isfile(path)
+    assert size > 0
+
+    meta = engine.probe_file(path)
+    assert meta.filename == unicode_filename
+    assert meta.duration > 0.0
+
+    wf = engine.extract_waveform(path, num_bins=90)
+    assert len(wf.peaks) == 90
+
+
+def test_probe_file_safely_handles_none_stderr(engine, sample_sine_audio):
+    """Simulated subprocess failure where stderr is None raises RuntimeError, not TypeError."""
+    import subprocess
+    from unittest.mock import patch
+
+    mock_proc = subprocess.CompletedProcess(
+        args=["ffmpeg"],
+        returncode=1,
+        stdout="",
+        stderr=None,
+    )
+    with patch("subprocess.run", return_value=mock_proc):
+        with pytest.raises(RuntimeError) as exc_info:
+            engine.probe_file(sample_sine_audio)
+        assert "Failed to read audio file" in str(exc_info.value)
+

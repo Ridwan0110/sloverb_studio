@@ -142,14 +142,21 @@ class AudioEngine:
             raise FileNotFoundError(f"Input file not found: {filepath}")
 
         cmd = [self.ffmpeg_path, "-hide_banner", "-i", filepath, "-f", "null", "-"]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        info = proc.stderr
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            errors="replace",
+        )
+        info = proc.stderr or ""
 
         if proc.returncode != 0 or "Invalid data found" in info:
-            raise RuntimeError(f"Failed to read audio file '{filepath}': {info.strip()}")
+            err_detail = info.strip() if info else f"Exit code {proc.returncode}"
+            raise RuntimeError(f"Failed to read audio file '{filepath}': {err_detail}")
 
         # Duration
-        dur_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", info)
+        dur_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", info)
         if dur_match:
             hours = int(dur_match.group(1))
             minutes = int(dur_match.group(2))
@@ -291,7 +298,7 @@ class AudioEngine:
             stderr_thread.join()
 
             if proc.returncode != 0:
-                err_msg = b"".join(err_output).decode('utf-8', errors='ignore')
+                err_msg = b"".join(err_output).decode('utf-8', errors='replace') if err_output else f"Exit code {proc.returncode}"
                 raise RuntimeError(f"FFmpeg waveform extraction failed: {err_msg}")
 
             # pad to num_bins if needed
@@ -313,7 +320,8 @@ class AudioEngine:
         else:
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if proc.returncode != 0:
-                raise RuntimeError(f"FFmpeg waveform extraction failed: {proc.stderr.decode('utf-8', errors='ignore')}")
+                err_msg = proc.stderr.decode('utf-8', errors='replace') if proc.stderr else f"Exit code {proc.returncode}"
+                raise RuntimeError(f"FFmpeg waveform extraction failed: {err_msg}")
             raw_data = np.frombuffer(proc.stdout, dtype=np.int16)
             if len(raw_data) == 0:
                 return WaveformData(peaks=[0.0] * num_bins, duration=meta.duration)
@@ -395,8 +403,14 @@ class AudioEngine:
         if not hasattr(self, "_supported_filters"):
             try:
                 cmd = [self.ffmpeg_path, "-hide_banner", "-filters"]
-                proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                if proc.returncode == 0:
+                proc = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                if proc.returncode == 0 and proc.stdout:
                     self._supported_filters = {
                         parts[1]
                         for line in proc.stdout.splitlines()
@@ -519,9 +533,16 @@ class AudioEngine:
 
         cmd.append(os.path.abspath(output_path))
 
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            errors="replace",
+        )
         if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg export failed with error:\n{proc.stderr}")
+            err_msg = proc.stderr.strip() if proc.stderr else f"Exit code {proc.returncode}"
+            raise RuntimeError(f"FFmpeg export failed with error:\n{err_msg}")
 
         if not os.path.isfile(output_path):
             raise FileNotFoundError(f"Export output file was not created at '{output_path}'")
@@ -601,7 +622,7 @@ class AudioEngine:
             stderr_thread.join()
 
             if proc.returncode != 0:
-                err_msg = b"".join(err_output).decode('utf-8', errors='ignore')
+                err_msg = b"".join(err_output).decode('utf-8', errors='replace') if err_output else f"Exit code {proc.returncode}"
                 self.cleanup()
                 raise RuntimeError(f"Failed to render audio buffer: {err_msg}")
 
@@ -616,7 +637,8 @@ class AudioEngine:
         else:
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if proc.returncode != 0:
-                raise RuntimeError(f"Failed to render audio buffer: {proc.stderr.decode('utf-8', errors='ignore')}")
+                err_msg = proc.stderr.decode('utf-8', errors='replace') if proc.stderr else f"Exit code {proc.returncode}"
+                raise RuntimeError(f"Failed to render audio buffer: {err_msg}")
 
             samples = np.frombuffer(proc.stdout, dtype=np.float32)
             if len(samples) % 2 != 0:

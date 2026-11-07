@@ -420,9 +420,13 @@ def run_verification_tests(binary_path: Path, expected_version: str) -> bool:
                 [str(binary_path), flag],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=15,
             )
-            combined_output = f"{res.stdout}\n{res.stderr}"
+            stdout = res.stdout or ""
+            stderr = res.stderr or ""
+            combined_output = f"{stdout}\n{stderr}"
             if res.returncode == 0 and expected_token in combined_output:
                 print("PASSED [OK]")
             else:
