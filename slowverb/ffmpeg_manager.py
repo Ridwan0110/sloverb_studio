@@ -61,11 +61,13 @@ def is_valid_ffmpeg_binary(binary_path: str) -> bool:
         return False
 
     try:
+        from slowverb.config import get_subprocess_no_window_kwargs
         proc = subprocess.run(
             [binary_path, "-version"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=5,
+            **get_subprocess_no_window_kwargs(),
         )
         return proc.returncode == 0
     except Exception:

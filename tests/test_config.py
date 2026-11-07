@@ -81,3 +81,22 @@ def test_package_version():
     assert isinstance(slowverb.__version__, str)
     assert re.match(r"^\d+\.\d+\.\d+", slowverb.__version__)
 
+
+def test_subprocess_no_window_kwargs():
+    """Verify platform-specific flags prevent console window flashing on Windows."""
+    import os
+    import subprocess
+    from slowverb.config import get_subprocess_no_window_kwargs
+
+    kwargs = get_subprocess_no_window_kwargs()
+    if os.name == "nt":
+        assert "creationflags" in kwargs
+        assert kwargs["creationflags"] == subprocess.CREATE_NO_WINDOW
+        assert "startupinfo" in kwargs
+        si = kwargs["startupinfo"]
+        assert si.dwFlags & subprocess.STARTF_USESHOWWINDOW
+        assert si.wShowWindow == subprocess.SW_HIDE
+    else:
+        assert kwargs == {}
+
+

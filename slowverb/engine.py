@@ -24,6 +24,7 @@ from slowverb.config import (
     MIN_REVERB,
     MIN_SPEED,
     get_ffmpeg_path,
+    get_subprocess_no_window_kwargs,
 )
 
 
@@ -148,6 +149,7 @@ class AudioEngine:
             stderr=subprocess.PIPE,
             encoding="utf-8",
             errors="replace",
+            **get_subprocess_no_window_kwargs(),
         )
         info = proc.stderr or ""
 
@@ -231,7 +233,12 @@ class AudioEngine:
         safe_limit = 50 * 1024 * 1024
 
         if file_size > safe_limit:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **get_subprocess_no_window_kwargs(),
+            )
             err_output = []
             def read_stderr():
                 for line in proc.stderr:
@@ -318,7 +325,12 @@ class AudioEngine:
             overall_rms = math.sqrt(sum_squares / total_samples) if total_samples > 0 else 0.0
 
         else:
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **get_subprocess_no_window_kwargs(),
+            )
             if proc.returncode != 0:
                 err_msg = proc.stderr.decode('utf-8', errors='replace') if proc.stderr else f"Exit code {proc.returncode}"
                 raise RuntimeError(f"FFmpeg waveform extraction failed: {err_msg}")
@@ -409,6 +421,7 @@ class AudioEngine:
                     stderr=subprocess.PIPE,
                     encoding="utf-8",
                     errors="replace",
+                    **get_subprocess_no_window_kwargs(),
                 )
                 if proc.returncode == 0 and proc.stdout:
                     self._supported_filters = {
@@ -539,6 +552,7 @@ class AudioEngine:
             stderr=subprocess.PIPE,
             encoding="utf-8",
             errors="replace",
+            **get_subprocess_no_window_kwargs(),
         )
         if proc.returncode != 0:
             err_msg = proc.stderr.strip() if proc.stderr else f"Exit code {proc.returncode}"
@@ -598,7 +612,12 @@ class AudioEngine:
             # Clean up old temporary files to prevent disk usage ballooning across rapid reloads
             self.cleanup()
 
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **get_subprocess_no_window_kwargs(),
+            )
             fd, temp_path = tempfile.mkstemp(suffix=".raw")
             self._temp_files.append(temp_path)
 
@@ -635,7 +654,12 @@ class AudioEngine:
             stereo_samples = np.memmap(temp_path, dtype=np.float32, mode='r', shape=(len(samples)//2, 2))
             return stereo_samples, target_sample_rate
         else:
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **get_subprocess_no_window_kwargs(),
+            )
             if proc.returncode != 0:
                 err_msg = proc.stderr.decode('utf-8', errors='replace') if proc.stderr else f"Exit code {proc.returncode}"
                 raise RuntimeError(f"Failed to render audio buffer: {err_msg}")

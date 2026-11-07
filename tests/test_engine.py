@@ -115,3 +115,26 @@ def test_build_filter_rubberband_missing_raises_error(engine, monkeypatch):
     with pytest.raises(RuntimeError, match="does not support the 'rubberband' audio filter"):
         engine.build_audio_filter_string(fx)
 
+
+def test_subprocess_no_window_flags_applied(engine, sample_sine_audio):
+    """Verify that engine subprocess calls include no-window flags to prevent terminal flashing on Windows."""
+    import os
+    import subprocess
+    from unittest.mock import patch
+
+    captured_kwargs = []
+    orig_run = subprocess.run
+
+    def mock_run(*args, **kwargs):
+        captured_kwargs.append(kwargs)
+        return orig_run(*args, **kwargs)
+
+    with patch("subprocess.run", side_effect=mock_run):
+        engine.probe_file(sample_sine_audio)
+
+    assert len(captured_kwargs) > 0
+    if os.name == "nt":
+        assert captured_kwargs[0].get("creationflags") == subprocess.CREATE_NO_WINDOW
+        assert "startupinfo" in captured_kwargs[0]
+
+

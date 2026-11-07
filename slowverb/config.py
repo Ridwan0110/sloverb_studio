@@ -120,3 +120,24 @@ def get_ffmpeg_path(ensure: bool = False, interactive: bool = True) -> str:
     project_root = get_project_root()
     exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     return os.path.abspath(os.path.join(project_root, "ffmpeg", exe_name))
+
+
+def get_subprocess_no_window_kwargs() -> dict:
+    """
+    Returns platform-specific subprocess creation flags and startupinfo to prevent
+    console/terminal windows from flashing or popping up when running GUI applications
+    on Windows (e.g. PyInstaller packaged windowed binaries or pythonw).
+    """
+    kwargs = {}
+    if os.name == "nt":
+        import subprocess
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        if hasattr(subprocess, "STARTUPINFO"):
+            si = subprocess.STARTUPINFO()
+            if hasattr(subprocess, "STARTF_USESHOWWINDOW"):
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            if hasattr(subprocess, "SW_HIDE"):
+                si.wShowWindow = subprocess.SW_HIDE
+            kwargs["startupinfo"] = si
+    return kwargs

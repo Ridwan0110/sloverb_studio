@@ -9,6 +9,7 @@ from slowverb.config import (
     PRESET_SLOWED_REVERB,
     Preset,
     get_ffmpeg_path,
+    get_subprocess_no_window_kwargs,
 )
 from slowverb.engine import (
     AudioEffects,
@@ -32,6 +33,7 @@ __all__ = [
     "PRESET_NIGHTCORE",
     "PRESET_DEFAULT",
     "get_ffmpeg_path",
+    "get_subprocess_no_window_kwargs",
     "FFmpegSetupView",
     "SlowVerbApp",
 ]
