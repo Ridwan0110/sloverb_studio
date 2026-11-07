@@ -1,6 +1,7 @@
 """Tests for GUI state management, preset triggers, slider synchronization, and waveform peeking."""
 
 import os
+import sys
 import flet as ft
 import pytest
 from slowverb.config import (
@@ -8,6 +9,7 @@ from slowverb.config import (
     COLOR_RED,
     FA_CHECK,
     FA_COPY,
+    FA_WARNING,
     PRESET_DEFAULT,
     PRESET_NIGHTCORE,
     PRESET_SLOWED_REVERB,
@@ -603,3 +605,57 @@ def test_copy_to_clipboard_helper():
     """Verify copy_to_clipboard executes without error."""
     result = copy_to_clipboard("Test error clipboard message", page=None)
     assert isinstance(result, bool)
+
+
+def test_copy_button_failure_feedback():
+    """Verify clicking Copy when clipboard operation fails reports ERROR COPYING."""
+    from unittest.mock import patch
+
+    app = SlowVerbApp()
+    app.build_ui()
+
+    error_text = "FAILED TO RENDER BUFFER"
+    app.set_status(error_text, is_error=True)
+
+    with patch("slowverb.ui.copy_to_clipboard", return_value=False):
+        app._on_copy_error_clicked()
+
+        # Check failure visual feedback
+        assert app.copy_error_btn_text.value == "ERROR COPYING"
+        assert app.copy_error_btn_icon.value == FA_WARNING
+        assert app.copy_error_btn_text.color == COLOR_RED
+        assert app.copy_error_btn_icon.color == COLOR_RED
+
+    app.close()
+
+
+def test_copy_to_clipboard_when_locked():
+    """Verify copy_to_clipboard returns False when another process locks the Windows clipboard."""
+    import platform
+    if platform.system() != "Windows":
+        return
+
+    import subprocess
+    from slowverb.ui import copy_to_clipboard
+
+    lock_script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "redu-dev", "keep_clipboard_locked.py")
+    if not os.path.isfile(lock_script):
+        return
+
+    proc = subprocess.Popen([sys.executable, lock_script], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        proc.stdout.readline()
+        proc.stdout.readline()
+
+        # While locked, copy_to_clipboard must fail and return False
+        assert copy_to_clipboard("Should fail to copy") is False
+    finally:
+        try:
+            proc.stdin.write("\n")
+            proc.stdin.flush()
+        except Exception:
+            pass
+        proc.wait(timeout=3)
+
+    # After unlock, copying should succeed
+    assert copy_to_clipboard("Should succeed after unlock") is True

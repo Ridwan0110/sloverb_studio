@@ -118,40 +118,98 @@ def save_file_desktop(initial_filename: str, ext: str, initial_dir: Optional[str
         return None
 
 
-def copy_to_clipboard(text: str, page: Optional[ft.Page] = None) -> bool:
-    """Copies text to the system clipboard using tkinter and Flet services fallback."""
-    copied = False
-    try:
-        import tkinter as tk
-        root = tk.Tk()
-        root.withdraw()
-        root.clipboard_clear()
-        root.clipboard_append(text)
-        root.update()
-        root.destroy()
-        copied = True
-    except Exception:
-        pass
+_clip_lock = threading.Lock()
 
-    if page:
+
+def copy_to_clipboard(text: str, page: Any = None) -> bool:
+    """Copies text to the system clipboard without heavy dependencies like Tkinter.
+    Accurately detects if clipboard access fails (e.g. locked by another application).
+    Returns True on success, False on failure.
+    """
+    if platform.system() == "Windows":
+        with _clip_lock:
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
+
+                CF_UNICODETEXT = 13
+                GMEM_MOVEABLE = 0x0002
+
+                user32.OpenClipboard.argtypes = [wintypes.HWND]
+                user32.OpenClipboard.restype = wintypes.BOOL
+                user32.CloseClipboard.argtypes = []
+                user32.CloseClipboard.restype = wintypes.BOOL
+                user32.EmptyClipboard.argtypes = []
+                user32.EmptyClipboard.restype = wintypes.BOOL
+                user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+                user32.SetClipboardData.restype = wintypes.HANDLE
+                user32.DestroyWindow.argtypes = [wintypes.HWND]
+                user32.DestroyWindow.restype = wintypes.BOOL
+
+                user32.CreateWindowExW.argtypes = [
+                    wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+                    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                    wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID
+                ]
+                user32.CreateWindowExW.restype = wintypes.HWND
+
+                kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+                kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+                kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+                kernel32.GlobalLock.restype = wintypes.LPVOID
+                kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+                kernel32.GlobalUnlock.restype = wintypes.BOOL
+                kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+                kernel32.GlobalFree.restype = wintypes.HGLOBAL
+
+                HWND_MESSAGE = wintypes.HWND(-3)
+                hwnd = user32.CreateWindowExW(0, "STATIC", "SloVerbClip", 0, 0, 0, 0, 0, HWND_MESSAGE, None, None, None)
+                if not hwnd:
+                    hwnd = user32.CreateWindowExW(0, "STATIC", "SloVerbClip", 0, 0, 0, 0, 0, None, None, None, None)
+                if not hwnd:
+                    return False
+
+                try:
+                    if not user32.OpenClipboard(hwnd):
+                        return False
+                    try:
+                        if not user32.EmptyClipboard():
+                            return False
+                        data = text.encode("utf-16le") + b"\x00\x00"
+                        h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+                        if not h_mem:
+                            return False
+                        ptr = kernel32.GlobalLock(h_mem)
+                        if not ptr:
+                            kernel32.GlobalFree(h_mem)
+                            return False
+                        ctypes.memmove(ptr, data, len(data))
+                        kernel32.GlobalUnlock(h_mem)
+                        if not user32.SetClipboardData(CF_UNICODETEXT, h_mem):
+                            kernel32.GlobalFree(h_mem)
+                            return False
+                        return True
+                    finally:
+                        user32.CloseClipboard()
+                finally:
+                    user32.DestroyWindow(hwnd)
+            except Exception as e:
+                print(f"Clipboard operation failed: {e}")
+                return False
+
+    # Unix / Linux / macOS command-line clipboard utilities
+    import subprocess
+    for cmd in [["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]:
         try:
-            clip_service = None
-            if hasattr(page, "services") and page.services:
-                for s in page.services:
-                    if isinstance(s, ft.Clipboard):
-                        clip_service = s
-                        break
-            if not clip_service:
-                clip_service = ft.Clipboard()
-                if hasattr(page, "services"):
-                    page.services.append(clip_service)
-            if hasattr(page, "run_task"):
-                page.run_task(clip_service.set, text)
-            copied = True
+            res = subprocess.run(cmd, input=text.encode("utf-8"), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0:
+                return True
         except Exception:
-            pass
-
-    return copied
+            continue
+    return False
 
 
 
@@ -1734,23 +1792,34 @@ class SlowVerbApp:
 
         self.update_ui()
 
-    def _set_copy_button_feedback(self, copied: bool):
-        """Sets the copy error button visuals between standard and copied confirmation."""
+    def _set_copy_button_feedback(self, status: Any = "normal", copied: Optional[bool] = None):
+        """Sets the copy error button visuals between standard ('normal'), confirmation ('success'), and failure ('error')."""
+        if copied is not None:
+            status = copied
+        if status is True or status == "success":
+            text = "COPIED!"
+            icon = FA_CHECK
+            color = COLOR_ACCENT
+        elif status == "error":
+            text = "ERROR COPYING"
+            icon = FA_WARNING
+            color = COLOR_RED
+        else:
+            text = "COPY"
+            icon = FA_COPY
+            color = COLOR_RED
+
         if hasattr(self, "copy_error_btn_text") and self.copy_error_btn_text:
-            self.copy_error_btn_text.value = "COPIED!" if copied else "COPY"
-            self.copy_error_btn_text.color = COLOR_ACCENT if copied else COLOR_RED
+            self.copy_error_btn_text.value = text
+            self.copy_error_btn_text.color = color
         if hasattr(self, "copy_error_btn_icon") and self.copy_error_btn_icon:
-            self.copy_error_btn_icon.value = FA_CHECK if copied else FA_COPY
-            self.copy_error_btn_icon.color = COLOR_ACCENT if copied else COLOR_RED
+            self.copy_error_btn_icon.value = icon
+            self.copy_error_btn_icon.color = color
         if hasattr(self, "copy_error_button") and self.copy_error_button:
-            self.copy_error_button.border = (
-                ft.Border.all(width=1, color=COLOR_ACCENT)
-                if copied
-                else ft.Border.all(width=1, color=COLOR_RED)
-            )
+            self.copy_error_button.border = ft.Border.all(width=1, color=color)
 
     def _on_copy_error_clicked(self):
-        """Copies the active error message to the system clipboard and displays confirmation."""
+        """Copies the active error message to the system clipboard and displays confirmation or error feedback."""
         text = self._last_error
         if not text and hasattr(self, "status_banner") and self.status_banner:
             val = self.status_banner.value or ""
@@ -1758,17 +1827,20 @@ class SlowVerbApp:
         if not text:
             return
 
-        copy_to_clipboard(text, page=self.page)
+        success = copy_to_clipboard(text, page=getattr(self, "page", None))
         self._copy_feedback_token += 1
         current_token = self._copy_feedback_token
 
-        self._set_copy_button_feedback(copied=True)
+        if success:
+            self._set_copy_button_feedback("success")
+        else:
+            self._set_copy_button_feedback("error")
         self.update_ui()
 
         def revert():
             time.sleep(2.0)
             if self._copy_feedback_token == current_token and self._last_error:
-                self._set_copy_button_feedback(copied=False)
+                self._set_copy_button_feedback("normal")
                 self.update_ui()
 
         threading.Thread(target=revert, daemon=True).start()
