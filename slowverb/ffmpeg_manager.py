@@ -434,3 +434,9 @@ def prompt_and_ensure_ffmpeg(
         "FFmpeg is required for SloVerb Studio audio processing, but was not found. "
         "Please install FFmpeg OS-wide or place the ffmpeg binary inside the ./ffmpeg/ folder."
     )
+
+
+def get_ffmpeg_provider(page=None, project_root: Optional[str] = None):
+    """Factory creating the appropriate FFmpeg provider for the current platform."""
+    from slowverb.ffmpeg import get_ffmpeg_provider as _get_provider
+    return _get_provider(page=page, project_root=project_root)
