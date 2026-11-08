@@ -208,7 +208,7 @@ def test_gui_visual_trim_collision_prevention_and_delete_warning(app, sample_sin
     assert app.trim_head_start_sec <= app.trim_head_end_sec
     assert abs(app.trim_head_start_sec - 1.5) < 0.05
 
-    # 2. When start == end, APPLY is disabled/greyed out with deletion notice
+    # 2. When start == end, APPLY is disabled/greyed out with deletion notice beside trim button
     app.trim_head_start_sec = 1.5
     app.trim_head_end_sec = 1.5
     app._update_trim_ui()
@@ -217,12 +217,19 @@ def test_gui_visual_trim_collision_prevention_and_delete_warning(app, sample_sin
     assert app.apply_trim_button.opacity < 1.0
     assert app.trim_notice_text.visible is True
     assert "THIS IS EQUAL TO DELETING THE FILE" in app.trim_notice_text.value
-    assert "THIS IS EQUAL TO DELETING THE FILE" in app.status_banner.value
+    # Deletion notice should NOT be in status banner, only beside trim button
+    assert "THIS IS EQUAL TO DELETING THE FILE" not in app.status_banner.value
 
     # Applying while disabled is safely ignored
     prev_effects_trim = app.effects.trim_start
     app.apply_trim()
     assert app.effects.trim_start == prev_effects_trim
+
+    # When start moves away from end, notice disappears immediately and apply is re-enabled
+    app.trim_head_start_sec = 1.0
+    app._update_trim_ui()
+    assert app.trim_notice_text.visible is False
+    assert app.apply_trim_button.disabled is False
 
 
 def test_gui_visual_trim_preview_playback_bounds(app, sample_sine_audio):
