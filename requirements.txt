@@ -1,4 +1,5 @@
 # SloVerb Studio — Core Runtime Dependencies
 flet>=1.0.0
+flet-audio>=1.0.4
 numpy>=1.26.0
 sounddevice>=0.4.6
