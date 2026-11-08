@@ -9,6 +9,7 @@ import time
 from typing import Callable, Any, Optional
 
 import flet as ft
+import numpy as np
 
 from slowverb.config import (
     APP_NAME,
@@ -566,6 +567,15 @@ class SlowVerbApp:
         self._last_error: Optional[str] = None
         self._copy_feedback_token: int = 0
 
+        # Visual waveform trim mode state
+        self.trim_mode: bool = False
+        self.trim_head_start_sec: float = 0.0
+        self.trim_head_end_sec: float = 0.0
+        self._active_drag_head: Optional[str] = None
+        self._full_raw_samples: Optional[np.ndarray] = None
+        self._full_sample_rate: int = 44100
+        self._full_waveform: Optional[WaveformData] = None
+
         self._update_pending = False
 
         if self.ffmpeg_path:
@@ -882,7 +892,40 @@ class SlowVerbApp:
             on_change=self._on_bass_changed,
         )
 
-        # Cut/Trim Controls
+        # Visual Waveform Cut/Trim Controls
+        self.trim_button = self._make_square_button(
+            "TRIM",
+            lambda e: self.enter_trim_mode(),
+            accent_color=COLOR_CYAN,
+            fa_icon=FA_SCISSORS,
+        )
+        self.apply_trim_button = self._make_square_button(
+            "APPLY",
+            lambda e: self.apply_trim(),
+            accent_color=COLOR_ACCENT,
+            fa_icon=FA_CHECK,
+        )
+        self.cancel_trim_button = self._make_square_button(
+            "CANCEL",
+            lambda e: self.cancel_trim(),
+            accent_color=COLOR_TEXT_DIM,
+            fa_icon=FA_UNDO,
+        )
+        self.trim_notice_text = ft.Text(
+            "NOTICE: THIS IS EQUAL TO DELETING THE FILE",
+            font_family=ROBOTIC_FONT,
+            size=11,
+            color=COLOR_RED,
+            weight=ft.FontWeight.BOLD,
+            visible=False,
+        )
+        self.trim_mode_row = ft.Row([
+            self.apply_trim_button,
+            self.cancel_trim_button,
+            self.trim_notice_text,
+        ], spacing=8, visible=False)
+
+        # Legacy trim controls kept for backwards compatibility during refactoring
         self.trim_start_field = ft.TextField(
             value="0.0",
             label="START (SEC)",
@@ -1153,12 +1196,8 @@ class SlowVerbApp:
             self._make_square_button("STOP", lambda e: self.stop(), accent_color=COLOR_RED, fa_icon=FA_STOP),
             self._make_square_button("REWIND", lambda e: self.seek(0.0), accent_color=COLOR_TEXT_DIM, fa_icon=FA_REWIND),
             ft.VerticalDivider(width=20, color=COLOR_BORDER),
-            ft.Text("TRIM:", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT_DIM, weight=ft.FontWeight.BOLD),
-            self.trim_start_field,
-            self._make_square_button("SET START", lambda e: self.set_trim_start_from_playhead(), accent_color=COLOR_CYAN, fa_icon=FA_SCISSORS),
-            self.trim_end_field,
-            self._make_square_button("SET END", lambda e: self.set_trim_end_from_playhead(), accent_color=COLOR_CYAN, fa_icon=FA_SCISSORS),
-            self._make_square_button("RESET TRIM", lambda e: self.reset_trim(), accent_color=COLOR_TEXT_DIM, fa_icon=FA_UNDO),
+            self.trim_button,
+            self.trim_mode_row,
         ], spacing=8, alignment=ft.MainAxisAlignment.START)
 
         # Presets Bar
@@ -1647,6 +1686,85 @@ class SlowVerbApp:
         self.update_ui()
 
     # --- Trimming ---
+
+    def enter_trim_mode(self):
+        """Activates visual waveform trim mode."""
+        if not self.current_filepath or not self.metadata:
+            self.set_status("LOAD A TRACK BEFORE TRIMMING", is_error=True)
+            return
+
+        if self.player and self.player.is_playing():
+            self.pause()
+
+        self.trim_mode = True
+        if self.effects.trim_start > 0.0:
+            self.trim_head_start_sec = self.effects.trim_start
+        else:
+            self.trim_head_start_sec = 0.0
+
+        if self.effects.trim_end is not None and self.effects.trim_end > 0.0:
+            self.trim_head_end_sec = min(self.metadata.duration, self.effects.trim_end)
+        else:
+            self.trim_head_end_sec = self.metadata.duration
+
+        self.trim_button.visible = False
+        self.trim_mode_row.visible = True
+        self._update_trim_ui()
+        self.set_status("TRIM MODE ACTIVE // DRAG HEADS TO SELECT RANGE")
+        self.update_ui()
+
+    def cancel_trim(self):
+        """Exits trim mode without applying changes."""
+        self.trim_mode = False
+        self._active_drag_head = None
+        self.trim_head_start_sec = self.effects.trim_start
+        self.trim_head_end_sec = (
+            self.effects.trim_end
+            if self.effects.trim_end is not None
+            else (self.metadata.duration if self.metadata else 0.0)
+        )
+
+        self.trim_button.visible = True
+        self.trim_mode_row.visible = False
+        self._update_trim_ui()
+        self.set_status("TRIM CANCELLED")
+        self.update_ui()
+
+    def apply_trim(self):
+        """Applies trim bounds and exits trim mode."""
+        if not self.metadata:
+            return
+        if self.apply_trim_button.disabled or abs(self.trim_head_start_sec - self.trim_head_end_sec) < 1e-3:
+            return
+
+        self.effects.trim_start = self.trim_head_start_sec
+        self.effects.trim_end = self.trim_head_end_sec
+
+        self.trim_mode = False
+        self._active_drag_head = None
+        self.trim_button.visible = True
+        self.trim_mode_row.visible = False
+        self._update_trim_ui()
+        self.set_status(f"TRIM APPLIED: {self.effects.trim_start:.2f}s - {self.effects.trim_end:.2f}s")
+        self._update_version_indicator()
+        self.update_ui()
+
+    def _update_trim_ui(self):
+        """Updates apply button state and warning notice based on trim heads."""
+        if not self.trim_mode:
+            self.trim_notice_text.visible = False
+            return
+
+        is_equal = abs(self.trim_head_start_sec - self.trim_head_end_sec) < 1e-3
+        if is_equal:
+            self.apply_trim_button.disabled = True
+            self.apply_trim_button.opacity = 0.4
+            self.trim_notice_text.visible = True
+            self.set_status("NOTICE: THIS IS EQUAL TO DELETING THE FILE", is_error=True)
+        else:
+            self.apply_trim_button.disabled = False
+            self.apply_trim_button.opacity = 1.0
+            self.trim_notice_text.visible = False
 
     def _on_trim_fields_changed(self, e):
         """Validates and updates trim start and end values from text fields."""
