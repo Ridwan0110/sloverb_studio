@@ -1452,9 +1452,9 @@ class SlowVerbApp:
 
     # --- Waveform Peeking & Seeking ---
 
-    def _update_waveform_bars(self, playhead_ratio: float):
-        """Draws waveform bars with heights matching amplitude peaks and color matching playhead."""
-        peaks = self.waveform.peaks
+    def _update_waveform_bars(self, playhead_ratio: float = 0.0):
+        """Draws waveform bars with heights matching amplitude peaks and color matching playhead/trim."""
+        peaks = self.waveform.peaks if self.waveform else None
         if not peaks:
             for bar in self.wave_bar_containers:
                 if bar.height != 6:
@@ -1464,15 +1464,43 @@ class SlowVerbApp:
             return
 
         active_index = int(playhead_ratio * (len(self.wave_bar_containers) - 1))
-        for i, bar in enumerate(self.wave_bar_containers):
-            peak = peaks[i] if i < len(peaks) else 0.0
-            # Scale height from min 6px to max 88px
-            expected_h = max(6, int(peak * 88))
-            if bar.height != expected_h:
-                bar.height = expected_h
-            expected_bg = COLOR_WAVE_PLAYED if i <= active_index else COLOR_WAVE_UNPLAYED
-            if bar.bgcolor != expected_bg:
-                bar.bgcolor = expected_bg
+
+        if self.trim_mode:
+            dur = self._get_active_duration()
+            if dur <= 0:
+                dur = 1.0
+            num_bars = len(self.wave_bar_containers)
+            start_idx = int(max(0.0, min(1.0, self.trim_head_start_sec / dur)) * (num_bars - 1))
+            end_idx = int(max(0.0, min(1.0, self.trim_head_end_sec / dur)) * (num_bars - 1))
+
+            for i, bar in enumerate(self.wave_bar_containers):
+                peak = peaks[i] if i < len(peaks) else 0.0
+                expected_h = max(6, int(peak * 88))
+                if bar.height != expected_h:
+                    bar.height = expected_h
+
+                if i < start_idx or i > end_idx:
+                    # Outside trim selection: dimmed dark surface
+                    expected_bg = COLOR_SURFACE_LIGHT
+                elif i <= active_index:
+                    # Inside trim selection & played: neon green
+                    expected_bg = COLOR_WAVE_PLAYED
+                else:
+                    # Inside trim selection & unplayed: digital cyan
+                    expected_bg = COLOR_CYAN
+
+                if bar.bgcolor != expected_bg:
+                    bar.bgcolor = expected_bg
+        else:
+            for i, bar in enumerate(self.wave_bar_containers):
+                peak = peaks[i] if i < len(peaks) else 0.0
+                # Scale height from min 6px to max 88px
+                expected_h = max(6, int(peak * 88))
+                if bar.height != expected_h:
+                    bar.height = expected_h
+                expected_bg = COLOR_WAVE_PLAYED if i <= active_index else COLOR_WAVE_UNPLAYED
+                if bar.bgcolor != expected_bg:
+                    bar.bgcolor = expected_bg
 
     def _extract_local_x(self, e) -> Optional[float]:
         """Extracts local horizontal position from Flet tap or drag event."""
@@ -1593,7 +1621,7 @@ class SlowVerbApp:
         self._on_waveform_pan_update(e)
 
     def _update_trim_heads_and_waveform(self):
-        """Positions trim marker heads on the waveform stack."""
+        """Positions trim marker heads and updates waveform styling."""
         if not self.trim_mode:
             self.trim_start_head.visible = False
             self.trim_end_head.visible = False
@@ -1613,6 +1641,11 @@ class SlowVerbApp:
         self.trim_start_head.visible = True
         self.trim_end_head.visible = True
 
+        # Refresh bar colors to highlight active trimmed region
+        cur_t = self.player.get_current_time() if self.player else 0.0
+        cur_ratio = cur_t / dur if dur > 0 else 0.0
+        self._update_waveform_bars(playhead_ratio=cur_ratio)
+
         self.time_display_text.value = f"{self.trim_head_start_sec:04.1f}s - {self.trim_head_end_sec:04.1f}s / {dur:04.1f}s"
 
     def seek(self, seconds: float):
@@ -1621,22 +1654,30 @@ class SlowVerbApp:
         if dur <= 0:
             return
 
-        target_time = max(0.0, min(dur, seconds))
+        if self.trim_mode:
+            # Confine seek to within the active trim heads during trim preview
+            target_time = max(self.trim_head_start_sec, min(self.trim_head_end_sec, seconds))
+        else:
+            target_time = max(0.0, min(dur, seconds))
+
         self.player.seek(target_time)
 
         ratio = target_time / dur
         self._update_waveform_bars(playhead_ratio=ratio)
 
         # Update peak reading and time badge
-        peak_val = self.waveform.get_peak_at_time(target_time)
-        peak_db = self.waveform.get_peak_db_at_time(target_time)
+        peak_val = self.waveform.get_peak_at_time(target_time) if self.waveform else 0.0
+        peak_db = self.waveform.get_peak_db_at_time(target_time) if self.waveform else "-inf"
         self.peak_display_text.value = f"PEAK: {peak_db} dB ({int(peak_val*100)}%)"
 
         cur_m = int(target_time // 60)
         cur_s = target_time % 60
         tot_m = int(dur // 60)
         tot_s = dur % 60
-        self.time_display_text.value = f"{cur_m:02d}:{cur_s:04.1f} / {tot_m:02d}:{tot_s:04.1f}"
+        if self.trim_mode:
+            self.time_display_text.value = f"{target_time:04.1f}s / {self.trim_head_start_sec:04.1f}s - {self.trim_head_end_sec:04.1f}s"
+        else:
+            self.time_display_text.value = f"{cur_m:02d}:{cur_s:04.1f} / {tot_m:02d}:{tot_s:04.1f}"
 
         self.update_ui()
 
@@ -1648,8 +1689,14 @@ class SlowVerbApp:
             self.set_status("LOAD A TRACK BEFORE PLAYING", is_error=True)
             return
 
+        if self.trim_mode:
+            # Preview only between trim heads
+            cur_t = self.player.get_current_time()
+            if cur_t < self.trim_head_start_sec or cur_t >= self.trim_head_end_sec:
+                self.seek(self.trim_head_start_sec)
+
         self.player.play()
-        self.set_status("PLAYING...")
+        self.set_status("PLAYING PREVIEW..." if self.trim_mode else "PLAYING...")
         self._update_version_indicator()
         self._start_playback_poller()
         self.update_ui()
@@ -1668,7 +1715,10 @@ class SlowVerbApp:
         self.player.stop()
         self._playback_poller_id += 1
         self._playback_poll_active = False
-        self.seek(0.0)
+        if self.trim_mode:
+            self.seek(self.trim_head_start_sec)
+        else:
+            self.seek(0.0)
         self.set_status("STOPPED")
         self._update_version_indicator()
         self.update_ui()
@@ -1682,6 +1732,15 @@ class SlowVerbApp:
         if not self.player:
             return
         cur_t = self.player.get_current_time()
+
+        if self.trim_mode:
+            # Stop preview playback when reaching the end trim head
+            if cur_t >= self.trim_head_end_sec:
+                self.pause()
+                self.seek(self.trim_head_start_sec)
+                self.set_status("TRIM PREVIEW COMPLETED")
+                return
+
         tot_t = self._get_active_duration()
         if tot_t > 0:
             ratio = cur_t / tot_t
@@ -1690,7 +1749,10 @@ class SlowVerbApp:
             cur_s = cur_t % 60
             tot_m = int(tot_t // 60)
             tot_s = tot_t % 60
-            new_time_str = f"{cur_m:02d}:{cur_s:04.1f} / {tot_m:02d}:{tot_s:04.1f}"
+            if self.trim_mode:
+                new_time_str = f"{cur_t:04.1f}s / {self.trim_head_start_sec:04.1f}s - {self.trim_head_end_sec:04.1f}s"
+            else:
+                new_time_str = f"{cur_m:02d}:{cur_s:04.1f} / {tot_m:02d}:{tot_s:04.1f}"
             if self.time_display_text.value != new_time_str:
                 self.time_display_text.value = new_time_str
 
