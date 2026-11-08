@@ -156,9 +156,10 @@ def test_get_windows_file_version():
 
 def test_get_app_version_resolves_package():
     """Verify get_app_version accurately resolves the version from slowverb package."""
+    import slowverb
     repo_root = build_binary.get_repo_root()
     ver = build_binary.get_app_version(repo_root)
-    assert ver == "0.3.0"
+    assert ver == slowverb.__version__
 
 
 def test_get_app_version_explicit_override():
@@ -198,6 +199,7 @@ def test_get_app_version_default_fallback(tmp_path):
 
 def test_cli_dry_run_subprocess_detects_version():
     """Verify executing python redu-dev/build_binary.py via CLI detects package version."""
+    import slowverb
     repo_root = build_binary.get_repo_root()
     script_path = repo_root / "redu-dev" / "build_binary.py"
     res = subprocess.run(
@@ -210,9 +212,10 @@ def test_cli_dry_run_subprocess_detects_version():
         timeout=15,
     )
     assert res.returncode == 0
-    assert "Application Ver : v0.3.0" in res.stdout
+    assert f"Application Ver : v{slowverb.__version__}" in res.stdout
     assert "vUNKNOWN" not in res.stdout
-    assert "--file-version 0.3.0.0" in res.stdout
+    file_ver = build_binary.get_windows_file_version(slowverb.__version__)
+    assert f"--file-version {file_ver}" in res.stdout
 
 
 def test_create_distribution_archive_zip(tmp_path):
