@@ -7,7 +7,7 @@ This document provides a comprehensive technical overview of **SloVerb Studio** 
 ## 1. Project Overview & Identity
 
 - **Application Name**: SloVerb Studio
-- **Primary Purpose**: High-performance, minimalist desktop audio editing application for creating **slowed & reverb**, **nightcore**, pitch-shifted, and bass-boosted audio tracks with visual waveform peeking and instant MP3/Opus exporting.
+- **Primary Purpose**: High-performance, minimalist desktop audio editing application for creating **slowed & reverb**, **nightcore**, pitch-shifted, and bass-boosted audio tracks with visual waveform peeking, visual waveform trimming, and instant MP3/Opus exporting.
 - **UI Framework**: [Flet](https://flet.dev/) (Flutter-powered desktop GUI in Python).
 - **Design Philosophy**: Minimalist cyber/robotic terminal aesthetic:
   - Square borders (`border_radius=2`)
@@ -25,10 +25,14 @@ sloverb_studio/
 ├── sloverb_studio.py          # Primary application bootstrap & entry point
 ├── requirements.txt           # Core runtime dependency manifest
 ├── requirements-dev.txt       # Development & testing dependency manifest
+├── SloVerbStudio.spec         # PyInstaller packaging specification
+├── CHANGELOG.md               # Version history and release notes
 ├── LICENSE                    # MIT License
 ├── assets/
-│   └── fonts/
-│       └── fa-solid-900.ttf   # FontAwesome Free Solid icon font
+│   ├── fonts/
+│   │   └── fa-solid-900.ttf   # FontAwesome Free Solid icon font
+│   ├── design_tokens.json     # Cyber/robotic design tokens & colors
+│   └── DESIGN_SYSTEM.md       # UI component blueprints & spacing rules
 ├── docs/
 │   └── TODO.md                # Project backlog & technical issue tracking
 ├── ffmpeg/
@@ -41,15 +45,18 @@ sloverb_studio/
 │   ├── ffmpeg_manager.py      # OS-wide FFmpeg discovery, architecture detection, downloader
 │   ├── player.py              # Low-latency real-time AudioPlayer (sounddevice / PortAudio)
 │   └── ui.py                  # SlowVerbApp GUI, state controller, waveform geometry
-└── tests/                     # 100% passing PyTest suite (66+ tests)
+└── tests/                     # 100% passing PyTest suite (120+ tests)
     ├── conftest.py            # Test fixtures (synthetic sine wave opus/wav generators)
+    ├── test_build_binary.py   # Packaging, binary builder, platform detection
     ├── test_config.py         # Configuration & preset tests
+    ├── test_dynamic_playback_ui.py # Thread-safe UI updates & async poller
     ├── test_edge_cases.py     # Extreme sliders, empty files, out-of-range trim
     ├── test_effects.py        # DSP filter string generation & math
     ├── test_engine.py         # AudioEngine, probing, buffer rendering, export
     ├── test_entry_point.py    # sloverb_studio bootstrap & legacy main.py redirect
     ├── test_ffmpeg_manager.py # OS-wide detection, priority, user prompt, auto-download
-    ├── test_gui_state.py      # GUI state transitions, peeking geometry, presets
+    ├── test_ffmpeg_setup_gui.py # FFmpegSetupView GUI states, mock downloads
+    ├── test_gui_state.py      # GUI state transitions, peeking geometry, visual trim
     └── test_player.py         # AudioPlayer loading, playback, seeking, callbacks
 ```
 
@@ -102,6 +109,7 @@ sloverb_studio/
 - Uses `sounddevice.OutputStream` with a custom streaming callback (`_audio_callback`).
 - Maintains a thread-safe lock around frame indices, buffer references, and playback states.
 - Supports instant non-blocking `seek(seconds)`, `seek_ratio(0.0-1.0)`, `pause()`, and `stop()`.
+- Exposes `get_buffer()` and `get_sample_rate()` for zero-copy inspection.
 
 ### 4.4. Desktop GUI & State Controller (`slowverb/ui.py`)
 - **Waveform Peeking Geometry**:
@@ -109,8 +117,29 @@ sloverb_studio/
   - Seek ratio is calculated accurately as:
     $$\text{ratio} = \frac{\text{local\_x} - \text{start\_x}}{\text{total\_bars\_width}}$$
   - Accounts for container resizing via `_on_waveform_size_change` and `_on_page_resize`.
+
+- **Visual Waveform Trimming & Draggable Marker Heads**:
+  - Activated via the `TRIM` button, which toggles `APPLY` and `CANCEL` action controls and surfaces Start `[S]` (cyan) and End `[E]` (amber) draggable marker heads on top of the waveform canvas (`waveform_stack`).
+  - **Gesture Tracking**: Handled via `ft.GestureDetector` listening to `on_tap_down`, `on_pan_start`, `on_pan_update`, and `on_pan_end`.
+  - **Collision Prevention**: Start head cannot pass End head (`start <= end`). If `start == end`, the `APPLY` button is greyed out (`disabled=True`, `opacity=0.4`) and a red notice (`NOTICE: THIS IS EQUAL TO DELETING THE FILE`) is displayed beside the trim controls.
+  - **Preview Enforcement**: In trim mode, playback is confined to `[trim_head_start_sec, trim_head_end_sec]`, automatically pausing and rewinding to start when the end head is reached. Waveform bars inside the selection display cyan/green; bars outside are dimmed.
+
+- **Non-Destructive Trimming & Bidirectional Time Mapping**:
+  - **Full Track Preservation (`_get_full_track_buffer`)**: Untrimmed pristine raw samples (`_full_raw_samples`) and active DSP-rendered buffers (`_rendered_full_samples`) are retained across the whole track. Trimming slices the active playback view without destroying audio from memory. Users can re-enter trim mode at any time and drag marker heads outwards to extend the audio duration.
+  - **Time Domains**:
+    - **Original File Space ($t_{orig}$)**: Seconds on disk (`0.0` to `metadata.duration`). Stored in `effects.trim_start` and `effects.trim_end` for FFmpeg export (`-ss` and `-to`).
+    - **GUI Playback Space ($t_{gui}$)**: Scaled by active playback speed ($t_{gui} = t_{orig} / \text{speed}$).
+    - Bidirectional helpers `_gui_sec_to_orig_sec()` and `_orig_sec_to_gui_sec()` translate between domains.
+  - **Dynamic Duration Updates**: Moving the speed slider or applying presets immediately recalculates and updates the total duration in `time_display_text` to reflect the speed-scaled duration of the trimmed region.
+
+- **Playhead Persistence Across Mode Transitions**:
+  - Entering trim mode seamlessly maps the active playhead position into full-track space.
+  - Cancelling trim mode restores the playhead to the corresponding relative timestamp in the trimmed track.
+  - Applying trim mode resets the playhead to `0.0s` only when duration changed, or maintains position if unchanged.
+
 - **Status Indicator**:
   - Tracks whether the loaded audio buffer matches active slider parameters (`CURRENT MODIFIED VERSION` with green check) or whether sliders have drifted (`OLD MODIFIED VERSION` with amber warning).
+
 - **Thread-Safe UI Sync**:
   - Encapsulated in `update_ui()` with a dedicated `_ui_lock` to prevent WebSocket/Flutter protocol collisions.
 
@@ -147,6 +176,26 @@ The complete test suite runs via PyTest and must maintain 100% pass rate:
 
 ## 6. Guidelines for AI Agents
 
+### 6.1. Git & Version Control Protocol (CRITICAL RULES)
+
+1. **NO Autonomous Commits — Explicit User Request Only**:
+   - AI agents must **NEVER** create git commits on their own initiative.
+   - Do NOT commit after making a change unless the user explicitly tells you to do so (e.g., *"commit your changes"*, *"use a commit for each logical change"*).
+   - If unprompted, leave changes in the working tree or staged and report back to the user for review.
+2. **Atomic Commits — One Commit per Logical Change**:
+   - When the user instructs you to commit, strictly follow: **one commit for one logical change**.
+   - Never combine unrelated features, bug fixes, or test additions into a single monolithic commit.
+   - Keep commit messages short, concise, and structured with Conventional Commits syntax:
+     - `feat(ui): ...`
+     - `fix(dsp): ...`
+     - `test: ...`
+     - `docs: ...`
+3. **STRICT PROHIBITION: NEVER Push to Remote / Origin**:
+   - Under **NO circumstances** should an AI agent ever execute `git push` or push commits/branches to GitHub or any remote repository.
+   - Remote pushes, branch management, pull requests, and merges are strictly the user's prerogative.
+
+### 6.2. Engineering & Architecture Rules
+
 1. **Maintain De-Bloated Principles**:
    - Do NOT introduce dependencies on SciPy, PyDub, Librosa, SoundFile, or PyTorch.
    - Utilize FFmpeg filter graphs and NumPy vector operations.
@@ -157,7 +206,9 @@ The complete test suite runs via PyTest and must maintain 100% pass rate:
 3. **Respect Python 3.14 & Flet 1.0**:
    - In Flet 1.0, do not use legacy `flet.app(target=main)`. Use `flet.run(main)`.
    - Avoid unbundled controls in `page.overlay` (e.g. legacy `ft.FilePicker`), use native tkinter dialog wrappers (`pick_file_desktop`, `save_file_desktop`).
-4. **Refer to `docs/TODO.md`**:
-   - Always check `docs/TODO.md` before making changes to ongoing background poller or waveform synchronization features.
-5. **Adhere to `assets/DESIGN_SYSTEM.md`**:
+4. **Maintain 100% Test Suite Pass Rate**:
+   - Every modification must be verified against the test suite (`.\pyvenv\Scripts\python.exe -m pytest -v`).
+   - All 120+ tests must pass before completing any task.
+5. **Refer to `docs/TODO.md` & `assets/DESIGN_SYSTEM.md`**:
+   - Refer to `docs/TODO.md` before making architectural changes.
    - Refer to `assets/DESIGN_SYSTEM.md` and `assets/design_tokens.json` for component blueprints, exact color tokens, geometry rules, and typographic scales when designing or refactoring UI components.
