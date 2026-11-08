@@ -1,3 +1,32 @@
+## Version: v0.3.0
+
+Release v0.3.0 brings major memory optimizations for large audio processing, a status bar button to copy error details to the clipboard with visual feedback, silent background FFmpeg processing on Windows without terminal popups, and reverb filter stability fixes.
+
+## Added
+- Memory-mapped buffer streaming and chunked peak analysis for handling audio files exceeding 50MB without memory exhaustion (feature)
+- Status bar error copy button with real-time visual feedback confirming clipboard actions (feature)
+- Native Win32 and Unix command-line clipboard integration with error detection and reporting (feature)
+- Mobile platform clipboard support with Flet service fallback for Android and iOS environments (feature)
+- Console suppression helper for executing background subprocesses without terminal window popups (improvement)
+- Clipboard icon token and styling definitions in design system specifications (misc)
+
+## Changed
+- Replaced Tkinter clipboard management with zero-dependency native OS and CLI implementations (improvement)
+- Standardized UTF-8 encoding across audio probing, buffer rendering, and export subprocesses (improvement)
+- Fall back to UNKNOWN instead of a static version when version resolution fails during binary builds (improvement)
+- Updated gitignore rules to ignore all Opus audio files (misc)
+- Optimized and pruned unused imports across application modules (improvement)
+- Dynamically asserted package version metadata across test suites (improvement)
+
+## Fixed
+- Fixed out-of-memory crashes and subprocess pipe deadlocks when processing large audio files (bug)
+- Fixed unwanted terminal window flashing on Windows by applying no-window flags to all subprocess calls (bug)
+- Fixed audio filter errors at low reverb settings by enforcing a 0.01 minimum reflection decay floor (bug)
+- Fixed Unicode decoding errors when processing audio files with international titles and multi-byte characters (bug)
+
+## Removed
+- Removed Tkinter dependency from desktop clipboard handling pipeline (improvement)
+
 ## Version: v0.2.0
 
 Release v0.2.0 introduces universal cross-platform release packaging for Windows, Linux, and macOS, real-time dynamic playback UI updates via an asynchronous event-loop poller, clean application startup without default demo track loading, and configuration variable documentation.
