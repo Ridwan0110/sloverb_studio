@@ -3,10 +3,16 @@
 import threading
 from typing import Callable, Optional
 import numpy as np
-import sounddevice as sd
+
+try:
+    import sounddevice as sd
+except (ImportError, OSError):
+    sd = None
+
+from slowverb.player.base import BaseAudioPlayer
 
 
-class AudioPlayer:
+class SoundDevicePlayer(BaseAudioPlayer):
     """Real-time audio player using sounddevice OutputStream."""
 
     def __init__(self, on_playback_finished: Optional[Callable[[], None]] = None):
@@ -15,7 +21,7 @@ class AudioPlayer:
         self._position: int = 0
         self._playing: bool = False
         self._lock = threading.Lock()
-        self._stream: Optional[sd.OutputStream] = None
+        self._stream = None
         self._on_playback_finished = on_playback_finished
         self._finished_notified = False
 
@@ -35,6 +41,9 @@ class AudioPlayer:
 
     def _ensure_stream(self):
         """Initializes or reconfigures the sounddevice OutputStream."""
+        if sd is None:
+            return
+
         if self._stream is not None and self._stream.active:
             return
 
@@ -149,20 +158,18 @@ class AudioPlayer:
                 return 0.0
             return len(self._data) / self._sample_rate
 
-    def get_buffer(self) -> Optional[np.ndarray]:
-        """Returns the in-memory audio buffer numpy array."""
-        with self._lock:
-            return self._data
-
-    def get_sample_rate(self) -> int:
-        """Returns the sample rate of the loaded audio buffer."""
-        with self._lock:
-            return self._sample_rate
-
     def is_playing(self) -> bool:
         """Returns True if audio is actively playing."""
         with self._lock:
             return self._playing
+
+    def get_buffer(self) -> Optional[np.ndarray]:
+        """Returns the currently loaded numpy array buffer."""
+        return self._data
+
+    def get_sample_rate(self) -> int:
+        """Returns the sample rate of the loaded buffer."""
+        return self._sample_rate
 
     def close(self):
         """Closes the audio stream and releases resources."""
