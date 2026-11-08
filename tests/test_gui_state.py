@@ -128,8 +128,207 @@ def test_gui_waveform_peeking_and_seeking(app, sample_sine_audio):
     assert app.time_display_text.value.startswith("00:00.0")
 
 
+def test_gui_visual_trim_mode_activation_and_toggles(app, sample_sine_audio):
+    """Verify activating trim mode toggles TRIM button with APPLY/CANCEL and reveals waveform heads."""
+    app.load_file(sample_sine_audio)
+
+    # Initial state
+    assert app.trim_mode is False
+    assert app.trim_button.visible is True
+    assert app.trim_mode_row.visible is False
+    assert app.trim_start_head.visible is False
+    assert app.trim_end_head.visible is False
+
+    # Activate trim mode
+    app.enter_trim_mode()
+    assert app.trim_mode is True
+    assert app.trim_button.visible is False
+    assert app.trim_mode_row.visible is True
+    assert app.trim_start_head.visible is True
+    assert app.trim_end_head.visible is True
+    assert app.trim_head_start_sec == 0.0
+    assert abs(app.trim_head_end_sec - app.metadata.duration) < 0.05
+    assert app.apply_trim_button.disabled is False
+    assert app.trim_notice_text.visible is False
+
+
+def test_gui_visual_trim_dragging_and_clamping(app, sample_sine_audio):
+    """Verify dragging start and end heads across the visual waveform."""
+    app.load_file(sample_sine_audio)
+    app.enter_trim_mode()
+
+    bars_w = app.total_bars_width  # 718.0
+    container_w = app.waveform_container_width  # 1064.0
+    start_x = (container_w - bars_w) / 2.0  # 173.0
+
+    # Drag closer to start head (e.g. at 25% of waveform width)
+    x_25 = start_x + 0.25 * bars_w
+    event_start = ft.TapEvent("tap_down", app.waveform_gesture, local_position=ft.Offset(x=x_25, y=50.0))
+    app._on_waveform_gesture(event_start, is_pan=False)
+
+    expected_start_sec = 0.25 * app.metadata.duration
+    assert abs(app.trim_head_start_sec - expected_start_sec) < 0.1
+    assert app.trim_head_start_sec <= app.trim_head_end_sec
+
+    # Drag closer to end head (e.g. at 80% of waveform width)
+    x_80 = start_x + 0.80 * bars_w
+    event_end = ft.TapEvent("tap_down", app.waveform_gesture, local_position=ft.Offset(x=x_80, y=50.0))
+    app._on_waveform_gesture(event_end, is_pan=False)
+
+    expected_end_sec = 0.80 * app.metadata.duration
+    assert abs(app.trim_head_end_sec - expected_end_sec) < 0.1
+    assert app.trim_head_end_sec >= app.trim_head_start_sec
+
+
+def test_gui_visual_trim_collision_prevention_and_delete_warning(app, sample_sine_audio):
+    """Verify start head cannot pass end head, and equality greys out APPLY with notice."""
+    app.load_file(sample_sine_audio)
+    app.enter_trim_mode()
+
+    dur = app.metadata.duration
+
+    # 1. Prevent start head from passing end head
+    app.trim_head_end_sec = 1.5
+    app._active_drag_head = "start"
+    # Try dragging start head to 2.5s (beyond end head)
+    container_w = app.waveform_container_width
+    bars_w = app.total_bars_width
+    start_x = (container_w - bars_w) / 2.0
+    ratio_25 = 2.5 / dur
+    x_25 = start_x + ratio_25 * bars_w
+    event_drag_past = ft.DragUpdateEvent(
+        "pan_update",
+        app.waveform_gesture,
+        local_position=ft.Offset(x=x_25, y=50.0),
+        global_position=ft.Offset(x=x_25, y=50.0),
+    )
+    app._on_waveform_gesture(event_drag_past, is_pan=True)
+
+    # Start head must be clamped at end head (1.5s), never beyond
+    assert app.trim_head_start_sec <= app.trim_head_end_sec
+    assert abs(app.trim_head_start_sec - 1.5) < 0.05
+
+    # 2. When start == end, APPLY is disabled/greyed out with deletion notice
+    app.trim_head_start_sec = 1.5
+    app.trim_head_end_sec = 1.5
+    app._update_trim_ui()
+
+    assert app.apply_trim_button.disabled is True
+    assert app.apply_trim_button.opacity < 1.0
+    assert app.trim_notice_text.visible is True
+    assert "THIS IS EQUAL TO DELETING THE FILE" in app.trim_notice_text.value
+    assert "THIS IS EQUAL TO DELETING THE FILE" in app.status_banner.value
+
+    # Applying while disabled is safely ignored
+    prev_effects_trim = app.effects.trim_start
+    app.apply_trim()
+    assert app.effects.trim_start == prev_effects_trim
+
+
+def test_gui_visual_trim_preview_playback_bounds(app, sample_sine_audio):
+    """Verify playback in trim mode only previews audio between trim heads."""
+    app.load_file(sample_sine_audio)
+    app.enter_trim_mode()
+
+    # Set trim heads to 1.0s and 2.0s
+    app.trim_head_start_sec = 1.0
+    app.trim_head_end_sec = 2.0
+    app._update_trim_heads_and_waveform()
+
+    # Play starts from trim start head
+    app.seek(0.0)  # seeking in trim mode clamps to start head
+    assert abs(app.player.get_current_time() - 1.0) < 0.05
+
+    app.play()
+    assert "PLAYING PREVIEW" in app.status_banner.value
+
+    # Simulate playhead reaching trim_head_end_sec (2.0s)
+    app.player.seek(2.05)
+    app._update_playback_tick()
+
+    assert app.player.is_playing() is False
+    assert "TRIM PREVIEW COMPLETED" in app.status_banner.value
+    # Rewinds to trim start
+    assert abs(app.player.get_current_time() - 1.0) < 0.05
+
+
+def test_gui_visual_trim_apply_reduces_duration(app, sample_sine_audio):
+    """Verify APPLY trims the waveform duration and updates active buffer."""
+    app.load_file(sample_sine_audio)
+
+    app.enter_trim_mode()
+    app.trim_head_start_sec = 0.5
+    app.trim_head_end_sec = 2.0
+    expected_trimmed_dur = 1.5
+
+    app.apply_trim()
+
+    # Mode exited
+    assert app.trim_mode is False
+    assert app.trim_button.visible is True
+    assert app.trim_mode_row.visible is False
+
+    # Duration reduced in waveform and player
+    assert abs(app.waveform.duration - expected_trimmed_dur) < 0.05
+    assert abs(app.player.get_duration() - expected_trimmed_dur) < 0.05
+    assert app.effects.trim_start == 0.5
+    assert app.effects.trim_end == 2.0
+    assert abs(app.player.get_current_time() - 0.0) < 0.01
+
+
+def test_gui_visual_trim_extend_duration_non_destructive(app, sample_sine_audio):
+    """Verify user can re-enter trim mode and extend audio duration outwards non-destructively."""
+    app.load_file(sample_sine_audio)
+    full_dur = app.metadata.duration
+
+    # 1. Apply initial trim: 1.0s to 2.0s
+    app.enter_trim_mode()
+    app.trim_head_start_sec = 1.0
+    app.trim_head_end_sec = 2.0
+    app.apply_trim()
+    assert abs(app.player.get_duration() - 1.0) < 0.05
+
+    # 2. Re-enter trim mode: full track is restored to view and heads reflect current trim
+    app.enter_trim_mode()
+    assert abs(app.waveform.duration - full_dur) < 0.05
+    assert abs(app.player.get_duration() - full_dur) < 0.05
+    assert abs(app.trim_head_start_sec - 1.0) < 0.05
+    assert abs(app.trim_head_end_sec - 2.0) < 0.05
+
+    # 3. Extend trim outwards to 0.2s - 2.8s
+    app.trim_head_start_sec = 0.2
+    app.trim_head_end_sec = 2.8
+    app.apply_trim()
+
+    # 4. New extended duration applied
+    extended_dur = 2.6
+    assert abs(app.waveform.duration - extended_dur) < 0.05
+    assert abs(app.player.get_duration() - extended_dur) < 0.05
+    assert abs(app.effects.trim_start - 0.2) < 0.05
+    assert abs(app.effects.trim_end - 2.8) < 0.05
+
+
+def test_gui_visual_trim_cancel_restoration(app, sample_sine_audio):
+    """Verify CANCEL discards unsaved head adjustments and restores previous state."""
+    app.load_file(sample_sine_audio)
+    full_dur = app.metadata.duration
+
+    app.enter_trim_mode()
+    app.trim_head_start_sec = 0.8
+    app.trim_head_end_sec = 1.6
+
+    app.cancel_trim()
+
+    assert app.trim_mode is False
+    assert app.trim_button.visible is True
+    assert app.trim_mode_row.visible is False
+    assert app.effects.trim_start == 0.0
+    assert abs(app.effects.trim_end - full_dur) < 0.05
+    assert abs(app.player.get_duration() - full_dur) < 0.05
+
+
 def test_gui_trim_buttons(app, sample_sine_audio):
-    """Verify set trim start / end buttons lock playhead positions."""
+    """Verify legacy trim methods for compatibility."""
     app.load_file(sample_sine_audio)
 
     # Move playhead to 1.0s and lock start
