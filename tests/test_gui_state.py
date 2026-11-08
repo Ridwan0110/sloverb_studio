@@ -334,6 +334,39 @@ def test_gui_visual_trim_cancel_restoration(app, sample_sine_audio):
     assert abs(app.player.get_duration() - full_dur) < 0.05
 
 
+def test_gui_visual_trim_preserves_modified_preview_track(app, sample_sine_audio):
+    """Verify entering and exiting trim mode operates on the current modified track, not the raw loaded track."""
+    app.load_file(sample_sine_audio)
+    orig_dur = app.metadata.duration
+
+    # Apply 1.2x speed effect and simulate preview
+    app.effects.speed = 1.2
+    samples, sr = app.engine.render_pcm_buffer(app.current_filepath, app.effects)
+    eff_dur = len(samples) / sr
+    # Modified track duration should be shorter due to 1.2x speed
+    assert eff_dur < orig_dur
+
+    app.waveform = app.engine.extract_waveform_from_samples(samples, sample_rate=sr, num_bins=app.num_wave_bars, duration=eff_dur)
+    app.player.load_buffer(samples, sr)
+    app._current_track_samples = samples
+    app._current_track_sr = sr
+    app._current_track_waveform = app.waveform
+    app._trim_base_samples = samples
+    app._trim_base_sr = sr
+    app._trim_base_waveform = app.waveform
+
+    # Enter trim mode: must take the current modified track
+    app.enter_trim_mode()
+    assert abs(app.player.get_duration() - eff_dur) < 0.05
+    assert abs(app.waveform.duration - eff_dur) < 0.05
+    assert abs(app.trim_head_end_sec - eff_dur) < 0.05
+
+    # Cancel trim mode: modified track must NOT be replaced with original loaded track
+    app.cancel_trim()
+    assert abs(app.player.get_duration() - eff_dur) < 0.05
+    assert abs(app.waveform.duration - eff_dur) < 0.05
+
+
 def test_gui_trim_buttons(app, sample_sine_audio):
     """Verify legacy trim methods for compatibility."""
     app.load_file(sample_sine_audio)
