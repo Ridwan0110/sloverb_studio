@@ -149,6 +149,16 @@ class AudioPlayer:
                 return 0.0
             return len(self._data) / self._sample_rate
 
+    def get_buffer(self) -> Optional[np.ndarray]:
+        """Returns the in-memory audio buffer numpy array."""
+        with self._lock:
+            return self._data
+
+    def get_sample_rate(self) -> int:
+        """Returns the sample rate of the loaded audio buffer."""
+        with self._lock:
+            return self._sample_rate
+
     def is_playing(self) -> bool:
         """Returns True if audio is actively playing."""
         with self._lock:

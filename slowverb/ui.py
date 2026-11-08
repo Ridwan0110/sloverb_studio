@@ -575,6 +575,12 @@ class SlowVerbApp:
         self._full_raw_samples: Optional[np.ndarray] = None
         self._full_sample_rate: int = 44100
         self._full_waveform: Optional[WaveformData] = None
+        self._current_track_samples: Optional[np.ndarray] = None
+        self._current_track_sr: int = 44100
+        self._current_track_waveform: Optional[WaveformData] = None
+        self._trim_base_samples: Optional[np.ndarray] = None
+        self._trim_base_sr: int = 44100
+        self._trim_base_waveform: Optional[WaveformData] = None
 
         self._update_pending = False
 
@@ -1438,6 +1444,12 @@ class SlowVerbApp:
             self._full_raw_samples = raw_samples
             self._full_sample_rate = sr
             self._full_waveform = self.waveform
+            self._current_track_samples = raw_samples
+            self._current_track_sr = sr
+            self._current_track_waveform = self.waveform
+            self._trim_base_samples = raw_samples
+            self._trim_base_sr = sr
+            self._trim_base_waveform = self.waveform
             self.player.load_buffer(raw_samples, sr)
             self._rendered_effects = AudioEffects(trim_start=0.0, trim_end=self.metadata.duration)
             self._rendered_is_preview = False
@@ -1897,20 +1909,22 @@ class SlowVerbApp:
 
         self.trim_mode = True
 
-        # Restore full track waveform and raw audio buffer so user can see full track and extend if desired
-        if self._full_waveform is not None and self._full_raw_samples is not None:
-            self.waveform = self._full_waveform
-            self.player.load_buffer(self._full_raw_samples, self._full_sample_rate)
+        # In trim mode, base the trimming on the current modified track
+        if self._trim_base_waveform is not None and self._trim_base_samples is not None:
+            self.waveform = self._trim_base_waveform
+            self.player.load_buffer(self._trim_base_samples, self._trim_base_sr)
+
+        base_dur = self._get_active_duration()
 
         if self.effects.trim_start > 0.0:
-            self.trim_head_start_sec = self.effects.trim_start
+            self.trim_head_start_sec = min(base_dur, self.effects.trim_start)
         else:
             self.trim_head_start_sec = 0.0
 
         if self.effects.trim_end is not None and self.effects.trim_end > 0.0:
-            self.trim_head_end_sec = min(self.metadata.duration, self.effects.trim_end)
+            self.trim_head_end_sec = min(base_dur, self.effects.trim_end)
         else:
-            self.trim_head_end_sec = self.metadata.duration
+            self.trim_head_end_sec = base_dur
 
         self.trim_button.visible = False
         self.trim_mode_row.visible = True
@@ -1932,12 +1946,16 @@ class SlowVerbApp:
         )
 
         # If a trim was previously applied, restore the trimmed audio buffer & waveform
-        dur = self.metadata.duration if self.metadata else 0.0
-        if self._full_raw_samples is not None and (self.effects.trim_start > 0.0 or self.effects.trim_end < dur):
-            sr = self._full_sample_rate
+        base_dur = (
+            len(self._trim_base_samples) / self._trim_base_sr
+            if self._trim_base_samples is not None and self._trim_base_sr > 0
+            else (self.metadata.duration if self.metadata else 0.0)
+        )
+        if self._trim_base_samples is not None and (self.effects.trim_start > 0.0 or self.effects.trim_end < base_dur):
+            sr = self._trim_base_sr
             start_idx = max(0, int(self.effects.trim_start * sr))
-            end_idx = min(len(self._full_raw_samples), int(self.effects.trim_end * sr))
-            trimmed_samples = self._full_raw_samples[start_idx:end_idx]
+            end_idx = min(len(self._trim_base_samples), int(self.effects.trim_end * sr))
+            trimmed_samples = self._trim_base_samples[start_idx:end_idx]
             trimmed_dur = max(0.0, self.effects.trim_end - self.effects.trim_start)
             self.player.load_buffer(trimmed_samples, sr)
             self.waveform = self.engine.extract_waveform_from_samples(
@@ -1946,18 +1964,24 @@ class SlowVerbApp:
                 num_bins=self.num_wave_bars,
                 duration=trimmed_dur,
             )
+            self._current_track_samples = trimmed_samples
+            self._current_track_sr = sr
+            self._current_track_waveform = self.waveform
             self.player.seek(0.0)
             self._update_waveform_bars(playhead_ratio=0.0)
             tot_m = int(trimmed_dur // 60)
             tot_s = trimmed_dur % 60
             self.time_display_text.value = f"00:00.0 / {tot_m:02d}:{tot_s:04.1f}"
-        elif self._full_waveform is not None and self._full_raw_samples is not None:
-            self.waveform = self._full_waveform
-            self.player.load_buffer(self._full_raw_samples, self._full_sample_rate)
+        elif self._trim_base_waveform is not None and self._trim_base_samples is not None:
+            self.waveform = self._trim_base_waveform
+            self.player.load_buffer(self._trim_base_samples, self._trim_base_sr)
+            self._current_track_samples = self._trim_base_samples
+            self._current_track_sr = self._trim_base_sr
+            self._current_track_waveform = self._trim_base_waveform
             self.player.seek(0.0)
             self._update_waveform_bars(playhead_ratio=0.0)
-            tot_m = int(dur // 60)
-            tot_s = dur % 60
+            tot_m = int(base_dur // 60)
+            tot_s = base_dur % 60
             self.time_display_text.value = f"00:00.0 / {tot_m:02d}:{tot_s:04.1f}"
 
         self.trim_button.visible = True
@@ -1979,11 +2003,11 @@ class SlowVerbApp:
         trimmed_dur = max(0.0, self.effects.trim_end - self.effects.trim_start)
 
         # Slice PCM samples and re-bin waveform peaks for the trimmed region
-        if self._full_raw_samples is not None and len(self._full_raw_samples) > 0:
-            sr = self._full_sample_rate
+        if self._trim_base_samples is not None and len(self._trim_base_samples) > 0:
+            sr = self._trim_base_sr
             start_idx = max(0, int(self.effects.trim_start * sr))
-            end_idx = min(len(self._full_raw_samples), int(self.effects.trim_end * sr))
-            trimmed_samples = self._full_raw_samples[start_idx:end_idx]
+            end_idx = min(len(self._trim_base_samples), int(self.effects.trim_end * sr))
+            trimmed_samples = self._trim_base_samples[start_idx:end_idx]
 
             self.player.load_buffer(trimmed_samples, sr)
             self.waveform = self.engine.extract_waveform_from_samples(
@@ -1992,6 +2016,9 @@ class SlowVerbApp:
                 num_bins=self.num_wave_bars,
                 duration=trimmed_dur,
             )
+            self._current_track_samples = trimmed_samples
+            self._current_track_sr = sr
+            self._current_track_waveform = self.waveform
 
         self.trim_mode = False
         self._active_drag_head = None
@@ -2119,6 +2146,12 @@ class SlowVerbApp:
 
                 # 3. Load audio buffer into player and start playback
                 self.player.load_buffer(samples, sr)
+                self._current_track_samples = samples
+                self._current_track_sr = sr
+                self._current_track_waveform = self.waveform
+                self._trim_base_samples = samples
+                self._trim_base_sr = sr
+                self._trim_base_waveform = self.waveform
                 self._rendered_effects = AudioEffects(
                     speed=self.effects.speed,
                     pitch=self.effects.pitch,
