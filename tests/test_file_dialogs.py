@@ -22,6 +22,16 @@ def test_file_service_init_desktop():
 
     service = FileService(page=page)
     assert service.page == page
+    assert len(page.overlay) == 0
+
+
+def test_file_service_init_mobile():
+    page = MagicMock()
+    page.platform = ft.PagePlatform.ANDROID
+    page.overlay = []
+
+    service = FileService(page=page)
+    assert service.page == page
     assert len(page.overlay) == 1
 
 

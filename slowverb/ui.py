@@ -64,7 +64,9 @@ from slowverb.engine import (
     AudioMetadata,
     WaveformData,
 )
-from slowverb.player import AudioPlayer
+from slowverb.file_dialogs import FileService
+from slowverb.platform import is_mobile_environment
+from slowverb.player import AudioPlayer, create_audio_player
 
 
 def pick_file_desktop(initial_dir: Optional[str] = None) -> Optional[str]:
@@ -588,9 +590,21 @@ class SlowVerbApp:
 
         self._update_pending = False
 
+        self.file_service = FileService(
+            page=self.page,
+            on_file_picked=self.load_file,
+            on_save_completed=self._on_save_completed,
+        )
+        self.active_tab_index = 0
+        self.tab_peek_btn = None
+        self.tab_effects_btn = None
+        self.mobile_waveform_view = None
+        self.mobile_effects_view = None
+        self.mobile_tab_switcher = None
+
         if self.ffmpeg_path:
             self.engine = AudioEngine(self.ffmpeg_path)
-            self.player = AudioPlayer(on_playback_finished=self._on_playback_end)
+            self.player = create_audio_player(page=self.page, on_playback_finished=self._on_playback_end)
             self._init_controls()
             if self.page:
                 self._setup_page()
@@ -599,7 +613,7 @@ class SlowVerbApp:
                 self._setup_ffmpeg_page()
             else:
                 self.engine = AudioEngine(auto_ensure=True)
-                self.player = AudioPlayer(on_playback_finished=self._on_playback_end)
+                self.player = create_audio_player(page=self.page, on_playback_finished=self._on_playback_end)
                 self._init_controls()
 
     def update_ui(self):
@@ -638,6 +652,42 @@ class SlowVerbApp:
             except Exception:
                 pass
 
+    def _adapt_waveform_bars(self, width: float):
+        """Adaptively recalculates waveform bar count for mobile viewports."""
+        from slowverb.platform import is_mobile_environment
+        if not is_mobile_environment(self.page):
+            target_bars = 90
+        else:
+            usable = max(240.0, width - 40.0)
+            target_bars = max(32, min(90, int(usable / 8.0)))
+
+        if target_bars != self.num_wave_bars:
+            self.num_wave_bars = target_bars
+            self.total_bars_width = self.num_wave_bars * self.bar_width + (self.num_wave_bars - 1) * self.bar_spacing
+            self.wave_bar_containers.clear()
+            self.waveform_row.controls.clear()
+            for _ in range(self.num_wave_bars):
+                bar = ft.Container(
+                    width=int(self.bar_width),
+                    height=6,
+                    bgcolor=COLOR_WAVE_UNPLAYED,
+                    border_radius=ft.BorderRadius.all(1),
+                )
+                self.wave_bar_containers.append(bar)
+                self.waveform_row.controls.append(bar)
+
+            if hasattr(self, "waveform_stack") and self.waveform_stack:
+                self.waveform_stack.width = self.total_bars_width
+            if hasattr(self, "trim_end_head") and self.trim_end_head:
+                self.trim_end_head.left = max(0, int(self.total_bars_width - 16))
+            if self._current_track_samples is not None and self.engine is not None:
+                self.waveform = self.engine.extract_waveform_from_samples(
+                    self._current_track_samples,
+                    sample_rate=self._current_track_sr,
+                    num_bins=self.num_wave_bars,
+                )
+            self._update_waveform_bars(0.0)
+
     def _on_page_resize(self, e):
         """Updates estimated waveform container width when page is resized."""
         if self.page and hasattr(self.page, "width") and self.page.width:
@@ -645,6 +695,7 @@ class SlowVerbApp:
                 w = float(self.page.width)
                 if w > 0:
                     self.waveform_container_width = max(self.total_bars_width, w - 56.0)
+                    self._adapt_waveform_bars(w)
             except Exception:
                 pass
 
@@ -652,20 +703,32 @@ class SlowVerbApp:
         """Updates exact waveform container width after layout render."""
         if hasattr(e, "width") and e.width and e.width > 0:
             self.waveform_container_width = float(e.width)
+            self._adapt_waveform_bars(float(e.width))
 
     def _setup_page(self):
-        """Configures the desktop window and page styling."""
+        """Configures the desktop or mobile window and page styling."""
+        if not self.page:
+            return
+
+        from slowverb.platform import is_mobile_environment
+        is_mobile = is_mobile_environment(self.page)
+
         self.page.title = APP_NAME
         self.page.bgcolor = COLOR_BG
-        self.page.padding = 16
-        self.page.scroll = ft.ScrollMode.AUTO
+
+        if is_mobile:
+            self.page.padding = ft.Padding.only(top=10, left=12, right=12, bottom=12)
+            self.page.scroll = ft.ScrollMode.ADAPTIVE
+        else:
+            self.page.padding = 16
+            self.page.scroll = ft.ScrollMode.AUTO
 
         # Register FontAwesome Free Solid font
         self.page.fonts = {
             FONT_AWESOME_FONT: "fonts/fa-solid-900.ttf",
         }
 
-        if hasattr(self.page, "window") and self.page.window:
+        if hasattr(self.page, "window") and self.page.window and not is_mobile:
             try:
                 self.page.window.width = 1120
                 self.page.window.height = 900
@@ -723,7 +786,7 @@ class SlowVerbApp:
         """Called once FFmpeg has been downloaded, extracted, and verified."""
         self.ffmpeg_path = binary_path
         self.engine = AudioEngine(self.ffmpeg_path)
-        self.player = AudioPlayer(on_playback_finished=self._on_playback_end)
+        self.player = create_audio_player(page=self.page, on_playback_finished=self._on_playback_end)
         self._init_controls()
 
         if self.page:
@@ -1115,6 +1178,24 @@ class SlowVerbApp:
             padding=ft.Padding.symmetric(horizontal=10, vertical=4),
         )
 
+        # Mobile tabbed navigation controls
+        self.active_tab_index = 0
+        self.tab_peek_btn = self._make_square_button(
+            "01 // PEEK",
+            lambda e: self._switch_mobile_tab(0),
+            accent_color=COLOR_ACCENT,
+            bg_color=COLOR_SURFACE_LIGHT,
+        )
+        self.tab_effects_btn = self._make_square_button(
+            "02 // EFFECTS",
+            lambda e: self._switch_mobile_tab(1),
+            accent_color=COLOR_TEXT_DIM,
+            bg_color=COLOR_SURFACE,
+        )
+        self.mobile_waveform_view = None
+        self.mobile_effects_view = None
+        self.mobile_tab_switcher = None
+
     # --- UI Layout Builders ---
 
     def _make_square_button(
@@ -1202,8 +1283,15 @@ class SlowVerbApp:
             padding=ft.Padding.all(12),
         )
 
-    def build_ui(self) -> ft.Column:
-        """Assembles the full application UI layout."""
+    def build_ui(self) -> ft.Control:
+        """Assembles the full application UI layout based on active platform and viewport."""
+        from slowverb.platform import is_mobile_environment
+        if is_mobile_environment(self.page):
+            return self.build_mobile_ui()
+        return self.build_desktop_ui()
+
+    def build_desktop_ui(self) -> ft.Column:
+        """Assembles the full application UI layout for desktop environments."""
         # Header bar
         header_row = ft.Row([
             ft.Text(
@@ -1377,13 +1465,246 @@ class SlowVerbApp:
             ft.Container(height=16),
         ], spacing=12)
 
+    def build_mobile_ui(self) -> ft.Column:
+        """Assembles the mobile tabbed UI layout with static top bar (~45% height) and animated dynamic tabs."""
+        # Mobile Header Bar
+        mobile_header = ft.Row([
+            ft.Text(
+                "SLOVERB STUDIO",
+                font_family=ROBOTIC_FONT,
+                size=15,
+                weight=ft.FontWeight.BOLD,
+                color=COLOR_ACCENT,
+            ),
+            ft.Row([
+                self.format_badge_text,
+                self.version_badge_text,
+            ], spacing=8),
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+
+        # Static Top Bar Row 1: File Picker (20%) + Status Bar (80%)
+        load_button = ft.Container(
+            content=ft.Row([
+                ft.Text(FA_FOLDER_OPEN, font_family=FONT_AWESOME_FONT, size=11, color=COLOR_CYAN),
+                ft.Text("LOAD", font_family=ROBOTIC_FONT, size=11, weight=ft.FontWeight.BOLD, color=COLOR_CYAN),
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=4),
+            bgcolor=COLOR_SURFACE_LIGHT,
+            border=ft.Border.all(width=1, color=COLOR_CYAN),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=8),
+            on_click=lambda e: self._on_browse_clicked(),
+            ink=True,
+            expand=2,
+        )
+
+        self.status_row = ft.Row([
+            self.status_banner,
+            self.version_indicator_container,
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+        status_container = ft.Container(
+            content=ft.Column([
+                self.status_row,
+                self.status_error_row,
+            ], spacing=4),
+            bgcolor=COLOR_SURFACE,
+            border=ft.Border.all(width=1, color=COLOR_BORDER),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+            alignment=ft.Alignment.CENTER,
+            expand=8,
+        )
+
+        top_row_1 = ft.Row([load_button, status_container], spacing=8, alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+
+        # Static Top Bar Row 2: Playback Controls & Trim (Left) + Render (Right)
+        playback_controls = ft.Row([
+            self._make_square_button("PLAY", lambda e: self.play(), accent_color=COLOR_ACCENT, fa_icon=FA_PLAY),
+            self._make_square_button("PAUSE", lambda e: self.pause(), accent_color=COLOR_AMBER, fa_icon=FA_PAUSE),
+            self._make_square_button("STOP", lambda e: self.stop(), accent_color=COLOR_RED, fa_icon=FA_STOP),
+            self._make_square_button("REWIND", lambda e: self.seek(0.0), accent_color=COLOR_TEXT_DIM, fa_icon=FA_REWIND),
+            self.trim_button,
+            self.trim_mode_row,
+        ], spacing=6, alignment=ft.MainAxisAlignment.START, wrap=True)
+
+        render_controls = ft.Row([
+            self._make_square_button(
+                "PREVIEW",
+                lambda e: self.render_and_play_preview(),
+                accent_color=COLOR_CYAN,
+                fa_icon=FA_MUSIC,
+            ),
+            self._make_square_button(
+                "EXPORT",
+                lambda e: self.show_export_format_dialog(),
+                accent_color=COLOR_ACCENT,
+                bg_color=COLOR_SURFACE,
+                fa_icon=FA_EXPORT,
+            ),
+        ], spacing=6, alignment=ft.MainAxisAlignment.END)
+
+        top_row_2 = ft.Row([playback_controls, render_controls], spacing=8, alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True)
+
+        static_top_bar = ft.Container(
+            content=ft.Column([
+                top_row_1,
+                top_row_2,
+            ], spacing=8),
+            bgcolor=COLOR_SURFACE,
+            border=ft.Border.all(width=1, color=COLOR_BORDER),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.all(8),
+        )
+
+        # Dynamic Tab Bar Header (PEEK / EFFECTS)
+        tab_header_row = ft.Row([
+            ft.Container(content=self.tab_peek_btn, expand=True),
+            ft.Container(content=self.tab_effects_btn, expand=True),
+        ], spacing=6)
+
+        # Tab 1: PEEK Waveform View
+        waveform_header = ft.Row([
+            self.track_info_text,
+            ft.Row([
+                self.peak_display_text,
+                self.time_display_text,
+            ], spacing=8),
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True)
+
+        self.mobile_waveform_view = self._make_card(
+            "PEEK",
+            ft.Column([
+                waveform_header,
+                self.waveform_gesture,
+            ], spacing=6),
+            badge=None,
+        )
+
+        # Tab 2: EFFECTS View
+        mobile_presets_row = ft.Row([
+            ft.Text("PRESETS:", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT_DIM, weight=ft.FontWeight.BOLD),
+            self._make_square_button(
+                "1. SLOWED+REV",
+                lambda e: self.apply_preset(PRESET_SLOWED_REVERB),
+                accent_color=COLOR_ACCENT,
+            ),
+            self._make_square_button(
+                "2. NIGHTCORE",
+                lambda e: self.apply_preset(PRESET_NIGHTCORE),
+                accent_color=COLOR_CYAN,
+            ),
+            self._make_square_button(
+                "RESET",
+                lambda e: self.apply_preset(PRESET_DEFAULT),
+                accent_color=COLOR_TEXT_DIM,
+            ),
+        ], spacing=6, wrap=True)
+
+        effects_content = ft.Column([
+            mobile_presets_row,
+            ft.Divider(height=1, color=COLOR_BORDER),
+            # Speed Control
+            ft.Column([
+                ft.Row([
+                    ft.Text("TRACK SPEED (SLOW / FAST):", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT),
+                    self.speed_label,
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                self.speed_slider,
+            ], spacing=2),
+            # Pitch Control
+            ft.Column([
+                ft.Row([
+                    ft.Text("PITCH CONTROL:", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT),
+                    self.pitch_label,
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                self.pitch_slider,
+                self.link_pitch_checkbox,
+            ], spacing=2),
+            # Reverb Slider
+            ft.Column([
+                ft.Row([
+                    ft.Text("REVERB LEVEL (0 - 100%):", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT),
+                    self.reverb_label,
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                self.reverb_slider,
+            ], spacing=2),
+            # Bass Boost Slider
+            ft.Column([
+                ft.Row([
+                    ft.Text("BASS BOOST (0 - 100%):", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT),
+                    self.bass_label,
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                self.bass_slider,
+            ], spacing=2),
+        ], spacing=8)
+
+        self.mobile_effects_view = self._make_card(
+            "EFFECTS",
+            effects_content,
+            badge=None,
+        )
+
+        # Animated Switcher for Dynamic Tab View
+        self.mobile_tab_switcher = ft.AnimatedSwitcher(
+            content=self.mobile_waveform_view if self.active_tab_index == 0 else self.mobile_effects_view,
+            transition=ft.AnimatedSwitcherTransition.FADE,
+            duration=200,
+            reverse_duration=150,
+        )
+
+        return ft.Column([
+            mobile_header,
+            static_top_bar,
+            tab_header_row,
+            self.mobile_tab_switcher,
+            ft.Container(height=16),
+        ], spacing=10)
+
+    def _set_button_accent(self, btn: Optional[ft.Container], color: str, bg_color: str):
+        """Helper updating button borders, background, and text colors."""
+        if not btn:
+            return
+        btn.border = ft.Border.all(width=1, color=color)
+        btn.bgcolor = bg_color
+        if isinstance(btn.content, ft.Text):
+            btn.content.color = color
+        elif isinstance(btn.content, ft.Row):
+            for c in btn.content.controls:
+                c.color = color
+
+    def _switch_mobile_tab(self, index: int):
+        """Switches active mobile tab between Waveform (0) and Effects (1)."""
+        self.active_tab_index = index
+        if self.tab_peek_btn is None or self.tab_effects_btn is None:
+            return
+
+        if index == 0:
+            self._set_button_accent(self.tab_peek_btn, COLOR_ACCENT, COLOR_SURFACE_LIGHT)
+            self._set_button_accent(self.tab_effects_btn, COLOR_TEXT_DIM, COLOR_SURFACE)
+            if self.mobile_tab_switcher and self.mobile_waveform_view:
+                self.mobile_tab_switcher.content = self.mobile_waveform_view
+        else:
+            self._set_button_accent(self.tab_peek_btn, COLOR_TEXT_DIM, COLOR_SURFACE)
+            self._set_button_accent(self.tab_effects_btn, COLOR_ACCENT, COLOR_SURFACE_LIGHT)
+            if self.mobile_tab_switcher and self.mobile_effects_view:
+                self.mobile_tab_switcher.content = self.mobile_effects_view
+        self.update_ui()
+
+    def _on_save_completed(self, target_path: str):
+        """Called when an exported file is saved via FileService."""
+        self.set_status(f"EXPORT SAVED: '{os.path.basename(target_path)}'")
+        self.update_ui()
+
     # --- File Loading & Analysis ---
 
     def _on_browse_clicked(self, e=None):
-        """Opens native OS file chooser to load an audio file without Flutter plugins."""
-        picked = pick_file_desktop()
-        if picked:
-            self.load_file(picked)
+        """Opens file chooser to load an audio file (desktop native or mobile FilePicker)."""
+        if hasattr(self, "file_service") and self.file_service:
+            self.file_service.pick_audio_file()
+        else:
+            picked = pick_file_desktop()
+            if picked:
+                self.load_file(picked)
 
     def _on_save_as_clicked(self, e=None):
         """Prompts user for destination path using native OS dialog and exports track."""
@@ -2315,7 +2636,83 @@ class SlowVerbApp:
 
         threading.Thread(target=background_render, daemon=True).start()
 
-    def export_processed_track(self, custom_output_path: Optional[str] = None) -> Optional[str]:
+    def show_export_format_dialog(self):
+        """Displays cyber modal dialog prompting user to select export format on mobile."""
+        if not self.current_filepath or not self.metadata:
+            self.set_status("PLEASE LOAD AN AUDIO FILE BEFORE EXPORTING", is_error=True)
+            return
+
+        def _select_and_export(fmt: str):
+            if self.page and hasattr(self.page, "close"):
+                try:
+                    self.page.close(dlg)
+                except Exception:
+                    pass
+            elif self.page and hasattr(self.page, "dialog") and self.page.dialog:
+                self.page.dialog.open = False
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+            self.export_format = fmt
+            self.export_processed_track(export_format=fmt)
+
+        def _cancel(e):
+            if self.page and hasattr(self.page, "close"):
+                try:
+                    self.page.close(dlg)
+                except Exception:
+                    pass
+            elif self.page and hasattr(self.page, "dialog") and self.page.dialog:
+                self.page.dialog.open = False
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("EXPORT AUDIO TRACK", font_family=ROBOTIC_FONT, size=13, weight=ft.FontWeight.BOLD, color=COLOR_ACCENT),
+            content=ft.Column([
+                ft.Text("SELECT OUTPUT AUDIO FORMAT:", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT_DIM),
+                ft.Container(height=6),
+                self._make_square_button(
+                    "1. OPUS (160 KBPS HIGH EFFICIENCY)",
+                    lambda e: _select_and_export("opus"),
+                    accent_color=COLOR_CYAN,
+                    bg_color=COLOR_SURFACE_LIGHT,
+                ),
+                self._make_square_button(
+                    "2. MP3 (192 KBPS UNIVERSAL)",
+                    lambda e: _select_and_export("mp3"),
+                    accent_color=COLOR_ACCENT,
+                    bg_color=COLOR_SURFACE_LIGHT,
+                ),
+            ], spacing=8, tight=True),
+            actions=[
+                self._make_square_button("CANCEL", _cancel, accent_color=COLOR_TEXT_DIM, bg_color=COLOR_SURFACE),
+            ],
+            bgcolor=COLOR_SURFACE,
+            shape=ft.RoundedRectangleBorder(radius=2),
+        )
+
+        if self.page and hasattr(self.page, "open"):
+            try:
+                self.page.open(dlg)
+            except Exception:
+                pass
+        elif self.page:
+            self.page.dialog = dlg
+            dlg.open = True
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+    def export_processed_track(
+        self,
+        custom_output_path: Optional[str] = None,
+        export_format: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Exports the track with current effects, speed, pitch, reverb, and trimming.
         Returns the output path on success.
@@ -2324,8 +2721,11 @@ class SlowVerbApp:
             self.set_status("PLEASE LOAD AN AUDIO FILE BEFORE EXPORTING", is_error=True)
             return None
 
+        from slowverb.platform import is_mobile_environment
+        is_mobile = is_mobile_environment(self.page)
+
         # Determine target output path
-        ext = self.export_format.lower()
+        ext = (export_format or self.export_format).lower()
         if not custom_output_path:
             base, _ = os.path.splitext(self.current_filepath)
             # Descriptor tag based on active effects
@@ -2337,7 +2737,15 @@ class SlowVerbApp:
             if self.effects.bass_boost_percent > 1.0:
                 desc.append(f"bass{int(self.effects.bass_boost_percent)}")
             tag = "_".join(desc) if desc else "edited"
-            custom_output_path = f"{base}_{tag}.{ext}"
+            default_filename = f"{os.path.basename(base)}_{tag}.{ext}"
+
+            if is_mobile:
+                import tempfile
+                custom_output_path = os.path.join(tempfile.gettempdir(), default_filename)
+            else:
+                custom_output_path = f"{base}_{tag}.{ext}"
+        else:
+            default_filename = os.path.basename(custom_output_path)
 
         self.set_status("EXPORTING AUDIO TRACK... PLEASE WAIT...")
         self.update_ui()
@@ -2352,6 +2760,10 @@ class SlowVerbApp:
             mb = file_size / (1024 * 1024)
             self.set_status(f"EXPORT COMPLETED: '{os.path.basename(out_file)}' ({mb:.2f} MB)")
             self.update_ui()
+
+            if is_mobile and hasattr(self, "file_service") and self.file_service:
+                self.file_service.save_exported_file(out_file, default_filename)
+
             return out_file
         except Exception as ex:
             self.set_status(f"EXPORT ERROR: {str(ex)}", is_error=True)
