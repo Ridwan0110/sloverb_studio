@@ -111,6 +111,89 @@ def test_builder_dry_run():
         assert ret == 0
 
 
+def test_get_windows_file_version():
+    """Verify get_windows_file_version produces strictly valid 4-part numeric strings."""
+    import packaging.version
+
+    cases = [
+        ("0.3.0", "0.3.0.0"),
+        ("1.0", "1.0.0.0"),
+        ("v0.3.0", "0.3.0.0"),
+        ("0.3.0-rc1", "0.3.0.0"),
+        ("UNKNOWN", "0.0.0.0"),
+        ("", "0.0.0.0"),
+    ]
+    for input_ver, expected in cases:
+        actual = build_binary.get_windows_file_version(input_ver)
+        assert actual == expected
+        # Must be parseable by packaging.version without InvalidVersion error
+        pv = packaging.version.parse(actual)
+        assert hasattr(pv, "major")
+        assert hasattr(pv, "minor")
+        assert hasattr(pv, "micro")
+
+
+def test_get_app_version_resolves_package():
+    """Verify get_app_version accurately resolves the version from slowverb package."""
+    repo_root = build_binary.get_repo_root()
+    ver = build_binary.get_app_version(repo_root)
+    assert ver == "0.3.0"
+
+
+def test_get_app_version_explicit_override():
+    """Verify get_app_version respects explicit --app-version override."""
+    repo_root = build_binary.get_repo_root()
+    ver = build_binary.get_app_version(repo_root, explicit_version="v1.5.0")
+    assert ver == "1.5.0"
+
+
+def test_get_app_version_regex_fallback(tmp_path):
+    """Verify get_app_version falls back to parsing slowverb/__init__.py via regex."""
+    pkg_dir = tmp_path / "slowverb"
+    pkg_dir.mkdir()
+    init_file = pkg_dir / "__init__.py"
+    init_file.write_text('"""Doc."""\n__version__ = "0.9.5"\n')
+
+    # Point to a fake repo where slowverb module cannot be imported
+    with patch.dict("sys.modules", {"slowverb": None}):
+        ver = build_binary.get_app_version(tmp_path)
+        assert ver == "0.9.5"
+
+
+def test_get_app_version_env_var_fallback(tmp_path):
+    """Verify get_app_version falls back to GITHUB_REF_NAME or APP_VERSION env vars."""
+    with patch.dict(os.environ, {"GITHUB_REF_NAME": "v2.0.1"}):
+        ver = build_binary.get_app_version(tmp_path)
+        assert ver == "2.0.1"
+
+
+def test_get_app_version_default_fallback(tmp_path):
+    """Verify get_app_version defaults to 0.0.0 and never UNKNOWN."""
+    with patch.dict(os.environ, {}, clear=True):
+        ver = build_binary.get_app_version(tmp_path)
+        assert ver == "0.0.0"
+        assert ver != "UNKNOWN"
+
+
+def test_cli_dry_run_subprocess_detects_version():
+    """Verify executing python redu-dev/build_binary.py via CLI detects package version."""
+    repo_root = build_binary.get_repo_root()
+    script_path = repo_root / "redu-dev" / "build_binary.py"
+    res = subprocess.run(
+        [sys.executable, str(script_path), "--dry-run"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+    )
+    assert res.returncode == 0
+    assert "Application Ver : v0.3.0" in res.stdout
+    assert "vUNKNOWN" not in res.stdout
+    assert "--file-version 0.3.0.0" in res.stdout
+
+
 def test_create_distribution_archive_zip(tmp_path):
     """Verify create_distribution_archive creates a valid zip archive."""
     fake_dir = tmp_path / "SloVerbStudio.app"

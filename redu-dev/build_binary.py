@@ -16,6 +16,7 @@ Examples:
 import argparse
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -39,6 +40,92 @@ def get_repo_root() -> Path:
     if (Path.cwd() / "sloverb_studio.py").is_file():
         return Path.cwd().resolve()
     return (current / "..").resolve()
+
+
+# Ensure repository root is in sys.path so modules like `slowverb` can be imported
+# when this script is executed via `python redu-dev/build_binary.py` or from any working directory.
+_REPO_ROOT = get_repo_root()
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+
+def get_windows_file_version(version_str: str) -> str:
+    """
+    Returns a standardized 4-part numeric version string (e.g. '0.3.0.0')
+    compatible with Windows PE VERSIONINFO and packaging.version.parse.
+    """
+    nums = re.findall(r"\d+", version_str)
+    parts = [int(n) for n in nums[:3]]
+    while len(parts) < 3:
+        parts.append(0)
+    return f"{parts[0]}.{parts[1]}.{parts[2]}.0"
+
+
+def get_app_version(repo_root: Path, explicit_version: str | None = None) -> str:
+    """
+    Resolves the application version string using robust cascading strategies:
+    1. Explicit version argument (e.g. --app-version CLI flag)
+    2. Dynamic import of `slowverb.__version__` if package exists in repo_root
+    3. Static regex parsing of `slowverb/__init__.py` (avoids runtime audio dependency imports)
+    4. Environment variables (APP_VERSION, GITHUB_REF_NAME)
+    5. Git tags via `git describe`
+    6. Safe fallback default: "0.0.0" (never "UNKNOWN", preventing Windows PE version failure)
+    """
+    if explicit_version and explicit_version.strip() and explicit_version.strip().upper() != "UNKNOWN":
+        return explicit_version.strip().lstrip("v")
+
+    init_file = repo_root / "slowverb" / "__init__.py"
+
+    # 1. Try importing slowverb.__version__ if located in repo_root
+    if init_file.is_file():
+        try:
+            if str(repo_root) not in sys.path:
+                sys.path.insert(0, str(repo_root))
+            from slowverb import __version__ as pkg_version
+            if pkg_version and pkg_version.strip() and pkg_version.strip().upper() != "UNKNOWN":
+                return pkg_version.strip().lstrip("v")
+        except Exception:
+            pass
+
+    # 2. Try static regex parsing of slowverb/__init__.py
+    if init_file.is_file():
+        try:
+            content = init_file.read_text(encoding="utf-8")
+            match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
+            if match:
+                v = match.group(1).strip()
+                if v and v.upper() != "UNKNOWN":
+                    return v.lstrip("v")
+        except Exception:
+            pass
+
+    # 3. Check environment variables (e.g. GITHUB_REF_NAME="v0.3.0" during CI release tag builds)
+    for env_var in ("APP_VERSION", "GITHUB_REF_NAME"):
+        val = os.environ.get(env_var, "").strip()
+        if val and val.upper() != "UNKNOWN":
+            clean_val = val.lstrip("v")
+            if re.match(r"^\d+(\.\d+)*", clean_val):
+                return clean_val
+
+    # 4. Check git describe
+    if (repo_root / ".git").exists():
+        try:
+            git_res = subprocess.run(
+                ["git", "describe", "--tags", "--always"],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if git_res.returncode == 0 and git_res.stdout:
+                tag = git_res.stdout.strip().lstrip("v")
+                if re.match(r"^\d+(\.\d+)*", tag):
+                    return tag.split("-")[0]
+        except Exception:
+            pass
+
+    # 5. Safe fallback default: "0.0.0"
+    return "0.0.0"
 
 
 def detect_platform() -> tuple[str, str]:
@@ -164,6 +251,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Target CPU architecture override (must match host runner environment)",
     )
     parser.add_argument(
+        "--app-version",
+        type=str,
+        default=None,
+        help="Explicit version override (defaults to slowverb.__version__ or package metadata)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
@@ -252,11 +345,8 @@ def run_build(args: argparse.Namespace) -> int:
         print("    pip install -r requirements-dev.txt")
         return 1
 
-    # Fetch version from slowverb package
-    try:
-        from slowverb import __version__ as app_version
-    except Exception:
-        app_version = "UNKNOWN"
+    # Fetch version using robust resolution (imports slowverb, parses __init__.py, checks env vars/git, or defaults to 0.0.0)
+    app_version = get_app_version(repo_root, explicit_version=getattr(args, "app_version", None))
     print(f"Application Ver : v{app_version}")
 
     dist_dir = (repo_root / args.distpath).resolve()
@@ -280,6 +370,8 @@ def run_build(args: argparse.Namespace) -> int:
     # PyInstaller uses os.pathsep (';' on Windows, ':' on Linux/macOS)
     assets_src = str(repo_root / "assets")
     add_data_arg = f"{assets_src}{os.pathsep}assets"
+
+    windows_file_version = get_windows_file_version(app_version)
 
     flet_args = [
         "flet",
@@ -306,7 +398,7 @@ def run_build(args: argparse.Namespace) -> int:
         "--product-version",
         app_version,
         "--file-version",
-        f"{app_version}.0" if app_version.count(".") == 2 else f"{app_version}.0.0",
+        windows_file_version,
         "--copyright",
         "Copyright (C) 2026 SloVerb Studio",
         "-y",
