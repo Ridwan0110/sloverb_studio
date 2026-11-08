@@ -659,3 +659,34 @@ def test_copy_to_clipboard_when_locked():
 
     # After unlock, copying should succeed
     assert copy_to_clipboard("Should succeed after unlock") is True
+
+
+def test_copy_to_clipboard_mobile_fallback():
+    """Verify copy_to_clipboard on mobile environments uses page/service fallback and returns True."""
+    from unittest.mock import patch, MagicMock
+    from slowverb.ui import copy_to_clipboard
+
+    class MockMobilePage:
+        def __init__(self):
+            self.services = []
+            self.tasks = []
+
+        def run_task(self, handler, *args, **kwargs):
+            self.tasks.append((handler, args, kwargs))
+
+    mock_page = MockMobilePage()
+
+    # Simulate non-Windows environment (e.g. Android or iOS) with no CLI tools
+    with patch("platform.system", return_value="Linux"):
+        with patch("subprocess.run", side_effect=FileNotFoundError("Tool not found")):
+            result = copy_to_clipboard("Mobile error text", page=mock_page)
+            assert result is True
+            assert len(mock_page.tasks) == 1
+            assert mock_page.tasks[0][1] == ("Mobile error text",)
+
+    # Simulate mobile environment without page reference
+    with patch("platform.system", return_value="Linux"):
+        with patch("subprocess.run", side_effect=FileNotFoundError("Tool not found")):
+            with patch.dict(os.environ, {"FLET_PLATFORM": "android"}):
+                result_no_page = copy_to_clipboard("Mobile error text without page", page=None)
+                assert result_no_page is True

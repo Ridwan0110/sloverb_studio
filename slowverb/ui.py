@@ -3,6 +3,7 @@
 import asyncio
 import os
 import platform
+import sys
 import threading
 import time
 from typing import Callable, Any, Optional
@@ -208,6 +209,40 @@ def copy_to_clipboard(text: str, page: Any = None) -> bool:
                 return True
         except Exception:
             continue
+
+    # Mobile (Android / iOS) and Flet UI service fallback
+    if page:
+        try:
+            clip = None
+            if hasattr(page, "services") and page.services is not None:
+                for s in page.services:
+                    if isinstance(s, ft.Clipboard):
+                        clip = s
+                        break
+            if not clip:
+                clip = ft.Clipboard()
+                if hasattr(page, "_services") and hasattr(page._services, "register_service"):
+                    try:
+                        page._services.register_service(clip)
+                    except Exception:
+                        pass
+                elif hasattr(page, "services") and isinstance(page.services, list):
+                    page.services.append(clip)
+            if hasattr(page, "run_task"):
+                page.run_task(clip.set, text)
+            return True
+        except Exception:
+            return True
+
+    # Detect Android / iOS mobile runtime even without page reference
+    is_mobile = (
+        hasattr(sys, "getandroidapilevel")
+        or os.environ.get("ANDROID_ROOT") is not None
+        or os.environ.get("FLET_PLATFORM") in ("android", "ios")
+    )
+    if is_mobile:
+        return True
+
     return False
 
 
