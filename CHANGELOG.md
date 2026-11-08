@@ -8,13 +8,11 @@ Release v0.3.0 brings major memory optimizations for large audio processing, a s
 - Native Win32 and Unix command-line clipboard integration with error detection and reporting (feature)
 - Mobile platform clipboard support with Flet service fallback for Android and iOS environments (feature)
 - Console suppression helper for executing background subprocesses without terminal window popups (improvement)
-- Clipboard icon token and styling definitions in design system specifications (misc)
 
 ## Changed
 - Replaced Tkinter clipboard management with zero-dependency native OS and CLI implementations (improvement)
 - Standardized UTF-8 encoding across audio probing, buffer rendering, and export subprocesses (improvement)
-- Fall back to UNKNOWN instead of a static version when version resolution fails during binary builds (improvement)
-- Updated gitignore rules to ignore all Opus audio files (misc)
+- Fall back to `UNKNOWN` instead of a static version when version resolution fails during binary builds (improvement)
 - Optimized and pruned unused imports across application modules (improvement)
 - Dynamically asserted package version metadata across test suites (improvement)
 
