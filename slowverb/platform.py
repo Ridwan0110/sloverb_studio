@@ -67,8 +67,9 @@ def is_mobile_environment(page: Optional[ft.Page] = None) -> bool:
     if plat in (PlatformType.ANDROID, PlatformType.IOS):
         return True
 
-    if page is not None and hasattr(page, "width") and page.width is not None and page.width > 0:
-        if page.width < 650:
+    if page is not None and hasattr(page, "width"):
+        w = getattr(page, "width", None)
+        if isinstance(w, (int, float)) and 0 < w < 650:
             return True
 
     return False

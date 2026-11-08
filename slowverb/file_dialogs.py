@@ -41,16 +41,17 @@ class FileService:
         self._init_picker()
 
     def _init_picker(self):
-        if self.page is not None and hasattr(self.page, "overlay"):
-            self._file_picker = ft.FilePicker(
-                on_result=self._on_picker_result,
-            )
-            if self._file_picker not in self.page.overlay:
-                self.page.overlay.append(self._file_picker)
-                try:
-                    self.page.update()
-                except Exception:
-                    pass
+        if is_mobile_environment(self.page):
+            if self.page is not None and hasattr(self.page, "overlay"):
+                self._file_picker = ft.FilePicker(
+                    on_result=self._on_picker_result,
+                )
+                if self._file_picker not in self.page.overlay:
+                    self.page.overlay.append(self._file_picker)
+                    try:
+                        self.page.update()
+                    except Exception:
+                        pass
 
     def _dispatch_async(self, fn, *args, **kwargs):
         """Dispatches an async or synchronous function safely on page event loop."""
