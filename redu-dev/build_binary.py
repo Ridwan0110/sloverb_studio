@@ -49,6 +49,40 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 
+def patch_flet_cli_windows_binary_open_bug():
+    """
+    Patches an upstream bug in flet-cli 1.1.2 (win_utils.py:130):
+        with open(exe_path, "ab", encoding="utf-8") as exef:
+            exef.write(overlay_before)
+    In Python, opening files in binary mode ("ab") with an `encoding` argument raises:
+        ValueError: binary mode doesn't take an encoding argument
+    This monkeypatches builtins.open to strip `encoding`, `errors`, and `newline`
+    whenever binary mode ('b') is specified, allowing Windows builds to succeed.
+    """
+    import builtins
+
+    orig_open = builtins.open
+
+    def safe_open(*args, **kwargs):
+        mode = kwargs.get("mode")
+        if mode is None and len(args) > 1:
+            mode = args[1]
+        elif mode is None:
+            mode = "r"
+        if isinstance(mode, str) and "b" in mode:
+            kwargs.pop("encoding", None)
+            kwargs.pop("errors", None)
+            kwargs.pop("newline", None)
+        return orig_open(*args, **kwargs)
+
+    builtins.open = safe_open
+    return orig_open
+
+
+# Install patch at import time for Windows compatibility
+patch_flet_cli_windows_binary_open_bug()
+
+
 def get_windows_file_version(version_str: str) -> str:
     """
     Returns a standardized 4-part numeric version string (e.g. '0.3.0.0')
@@ -430,6 +464,9 @@ def run_build(args: argparse.Namespace) -> int:
 
     # Execute build via flet_cli
     import flet.cli
+
+    # Ensure Windows flet-cli 1.1.2 binary open bug patch is active
+    patch_flet_cli_windows_binary_open_bug()
 
     orig_argv = sys.argv
     orig_cwd = os.getcwd()

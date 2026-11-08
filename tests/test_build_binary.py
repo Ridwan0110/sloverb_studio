@@ -111,6 +111,27 @@ def test_builder_dry_run():
         assert ret == 0
 
 
+def test_patch_flet_cli_windows_binary_open_bug(tmp_path):
+    """Verify monkeypatch prevents ValueError when opening binary mode with encoding argument."""
+    build_binary.patch_flet_cli_windows_binary_open_bug()
+    target_file = tmp_path / "test_bin.exe"
+    target_file.write_bytes(b"EXISTING_PE_DATA")
+
+    # This exact line in flet_cli.__pyinstaller.win_utils crashed on Windows:
+    # with open(exe_path, "ab", encoding="utf-8") as exef:
+    #     exef.write(overlay_before)
+    with open(target_file, "ab", encoding="utf-8") as exef:
+        exef.write(b"_OVERLAY")
+
+    assert target_file.read_bytes() == b"EXISTING_PE_DATA_OVERLAY"
+
+    # Verify normal text open still works as expected
+    text_file = tmp_path / "test_text.txt"
+    with open(text_file, "w", encoding="utf-8") as tf:
+        tf.write("Hello world")
+    assert text_file.read_text(encoding="utf-8") == "Hello world"
+
+
 def test_get_windows_file_version():
     """Verify get_windows_file_version produces strictly valid 4-part numeric strings."""
     import packaging.version
