@@ -816,8 +816,68 @@ class SlowVerbApp:
             self.wave_bar_containers.append(bar)
             self.waveform_row.controls.append(bar)
 
+        # Waveform Trim Marker Heads (Interactive Draggable Handles)
+        self.trim_start_head = ft.Container(
+            width=16,
+            height=94,
+            left=0,
+            top=0,
+            visible=False,
+            content=ft.Column([
+                ft.Container(
+                    width=16,
+                    height=14,
+                    bgcolor=COLOR_CYAN,
+                    border_radius=ft.BorderRadius.all(1),
+                    alignment=ft.Alignment.CENTER,
+                    content=ft.Text("S", font_family=ROBOTIC_FONT, size=9, weight=ft.FontWeight.BOLD, color=COLOR_BG),
+                ),
+                ft.Container(
+                    width=3,
+                    height=80,
+                    bgcolor=COLOR_CYAN,
+                    border_radius=ft.BorderRadius.all(1),
+                ),
+            ], alignment=ft.MainAxisAlignment.START, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0),
+        )
+
+        self.trim_end_head = ft.Container(
+            width=16,
+            height=94,
+            left=max(0, int(self.total_bars_width - 16)),
+            top=0,
+            visible=False,
+            content=ft.Column([
+                ft.Container(
+                    width=16,
+                    height=14,
+                    bgcolor=COLOR_AMBER,
+                    border_radius=ft.BorderRadius.all(1),
+                    alignment=ft.Alignment.CENTER,
+                    content=ft.Text("E", font_family=ROBOTIC_FONT, size=9, weight=ft.FontWeight.BOLD, color=COLOR_BG),
+                ),
+                ft.Container(
+                    width=3,
+                    height=80,
+                    bgcolor=COLOR_AMBER,
+                    border_radius=ft.BorderRadius.all(1),
+                ),
+            ], alignment=ft.MainAxisAlignment.START, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0),
+        )
+
+        self.waveform_stack = ft.Stack(
+            controls=[
+                self.waveform_row,
+                self.trim_start_head,
+                self.trim_end_head,
+            ],
+            width=self.total_bars_width,
+            height=94,
+            alignment=ft.Alignment.CENTER,
+        )
+
         self.waveform_container = ft.Container(
-            content=self.waveform_row,
+            content=self.waveform_stack,
             height=110,
             bgcolor=COLOR_SURFACE,
             border=ft.Border.all(width=1, color=COLOR_BORDER),
@@ -830,9 +890,10 @@ class SlowVerbApp:
         self.waveform_gesture = ft.GestureDetector(
             content=self.waveform_container,
             mouse_cursor=ft.MouseCursor.CLICK,
-            on_tap_down=self._on_waveform_gesture,
-            on_pan_start=self._on_waveform_gesture,
-            on_pan_update=self._on_waveform_gesture,
+            on_tap_down=self._on_waveform_tap_down,
+            on_pan_start=self._on_waveform_pan_start,
+            on_pan_update=self._on_waveform_pan_update,
+            on_pan_end=self._on_waveform_pan_end,
         )
 
         # Speed Slider
@@ -1459,8 +1520,8 @@ class SlowVerbApp:
             return self.metadata.duration
         return 0.0
 
-    def _on_waveform_gesture(self, e):
-        """Peeks/seeks to the exact position clicked or dragged on the waveform."""
+    def _on_waveform_gesture(self, e, is_pan: bool = False):
+        """Peeks/seeks in playback mode or moves trim heads in trim mode."""
         dur = self._get_active_duration()
         if dur <= 0:
             return
@@ -1471,15 +1532,88 @@ class SlowVerbApp:
 
         ratio = self._calculate_waveform_ratio(local_x)
         target_sec = ratio * dur
-        self.seek(target_sec)
+
+        if not self.trim_mode:
+            self.seek(target_sec)
+            return
+
+        # --- In Trim Mode: Move or drag the active head ---
+        if self._active_drag_head is None:
+            dist_start = abs(target_sec - self.trim_head_start_sec)
+            dist_end = abs(target_sec - self.trim_head_end_sec)
+            if dist_start < dist_end:
+                self._active_drag_head = "start"
+            elif dist_end < dist_start:
+                self._active_drag_head = "end"
+            else:
+                if target_sec <= self.trim_head_start_sec:
+                    self._active_drag_head = "start"
+                else:
+                    self._active_drag_head = "end"
+
+        # Boundary checks:
+        # Start head cannot pass end head (start <= end)
+        # End head cannot pass start head (end >= start)
+        if self._active_drag_head == "start":
+            self.trim_head_start_sec = max(0.0, min(self.trim_head_end_sec, target_sec))
+        elif self._active_drag_head == "end":
+            self.trim_head_end_sec = min(dur, max(self.trim_head_start_sec, target_sec))
+
+        if not is_pan:
+            # Single tap releases the active drag head immediately
+            self._active_drag_head = None
+
+        self._update_trim_heads_and_waveform()
+        self._update_trim_ui()
+        self.update_ui()
+
+    def _on_waveform_tap_down(self, e):
+        """Handles tap down on waveform."""
+        self._on_waveform_gesture(e, is_pan=False)
+
+    def _on_waveform_pan_start(self, e):
+        """Handles pan start on waveform."""
+        self._active_drag_head = None
+        self._on_waveform_gesture(e, is_pan=True)
+
+    def _on_waveform_pan_update(self, e):
+        """Handles continuous pan drag on waveform."""
+        self._on_waveform_gesture(e, is_pan=True)
+
+    def _on_waveform_pan_end(self, e):
+        """Releases drag head on pan end."""
+        self._active_drag_head = None
 
     def _on_waveform_tap(self, e: ft.TapEvent):
         """Tap event handler delegating to gesture processor."""
-        self._on_waveform_gesture(e)
+        self._on_waveform_tap_down(e)
 
     def _on_waveform_pan(self, e: ft.DragUpdateEvent):
         """Pan/drag event handler delegating to gesture processor."""
-        self._on_waveform_gesture(e)
+        self._on_waveform_pan_update(e)
+
+    def _update_trim_heads_and_waveform(self):
+        """Positions trim marker heads on the waveform stack."""
+        if not self.trim_mode:
+            self.trim_start_head.visible = False
+            self.trim_end_head.visible = False
+            return
+
+        dur = self._get_active_duration()
+        if dur <= 0:
+            dur = 1.0
+
+        ratio_start = max(0.0, min(1.0, self.trim_head_start_sec / dur))
+        ratio_end = max(0.0, min(1.0, self.trim_head_end_sec / dur))
+
+        head_w = 16.0
+        track_w = self.total_bars_width - head_w
+        self.trim_start_head.left = max(0.0, min(self.total_bars_width - head_w, ratio_start * track_w))
+        self.trim_end_head.left = max(0.0, min(self.total_bars_width - head_w, ratio_end * track_w))
+        self.trim_start_head.visible = True
+        self.trim_end_head.visible = True
+
+        self.time_display_text.value = f"{self.trim_head_start_sec:04.1f}s - {self.trim_head_end_sec:04.1f}s / {dur:04.1f}s"
 
     def seek(self, seconds: float):
         """Seeks playback to specified timestamp and updates UI peeking info."""
@@ -1709,6 +1843,7 @@ class SlowVerbApp:
 
         self.trim_button.visible = False
         self.trim_mode_row.visible = True
+        self._update_trim_heads_and_waveform()
         self._update_trim_ui()
         self.set_status("TRIM MODE ACTIVE // DRAG HEADS TO SELECT RANGE")
         self.update_ui()
@@ -1726,6 +1861,7 @@ class SlowVerbApp:
 
         self.trim_button.visible = True
         self.trim_mode_row.visible = False
+        self._update_trim_heads_and_waveform()
         self._update_trim_ui()
         self.set_status("TRIM CANCELLED")
         self.update_ui()
@@ -1744,6 +1880,7 @@ class SlowVerbApp:
         self._active_drag_head = None
         self.trim_button.visible = True
         self.trim_mode_row.visible = False
+        self._update_trim_heads_and_waveform()
         self._update_trim_ui()
         self.set_status(f"TRIM APPLIED: {self.effects.trim_start:.2f}s - {self.effects.trim_end:.2f}s")
         self._update_version_indicator()
