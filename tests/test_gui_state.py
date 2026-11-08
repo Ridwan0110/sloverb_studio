@@ -367,6 +367,43 @@ def test_gui_visual_trim_preserves_modified_preview_track(app, sample_sine_audio
     assert abs(app.waveform.duration - eff_dur) < 0.05
 
 
+def test_gui_visual_trim_playhead_persistence(app, sample_sine_audio):
+    """Verify playhead position is preserved seamlessly on enter and cancel, and resets on apply if duration changed."""
+    app.load_file(sample_sine_audio)
+    full_dur = app.metadata.duration
+
+    # 1. Playhead at 1.5s -> Enter trim mode -> Playhead must remain at 1.5s
+    app.seek(1.5)
+    assert abs(app.player.get_current_time() - 1.5) < 0.05
+
+    app.enter_trim_mode()
+    assert abs(app.player.get_current_time() - 1.5) < 0.05
+
+    # 2. Inside trim mode, seek to 2.1s -> Cancel trim -> Playhead must remain at 2.1s
+    app.seek(2.1)
+    assert abs(app.player.get_current_time() - 2.1) < 0.05
+
+    app.cancel_trim()
+    assert abs(app.player.get_current_time() - 2.1) < 0.05
+
+    # 3. Enter trim mode, trim duration from full to 0.5s - 2.0s (duration changes) -> Apply -> Playhead resets to 0.0s
+    app.seek(1.8)
+    app.enter_trim_mode()
+    app.trim_head_start_sec = 0.5
+    app.trim_head_end_sec = 2.0
+    app.apply_trim()
+    # Duration changed from full_dur (~3.0s) to 1.5s, playhead resets to 0.0s
+    assert abs(app.player.get_current_time() - 0.0) < 0.01
+
+    # 4. If user enters trim mode and applies full duration (duration doesn't change) -> Playhead remains where it was
+    app.load_file(sample_sine_audio)
+    app.seek(1.2)
+    app.enter_trim_mode()
+    # trim heads default to full track (0.0 to full_dur, no duration change)
+    app.apply_trim()
+    assert abs(app.player.get_current_time() - 1.2) < 0.05
+
+
 def test_gui_trim_buttons(app, sample_sine_audio):
     """Verify legacy trim methods for compatibility."""
     app.load_file(sample_sine_audio)

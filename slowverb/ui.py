@@ -1899,11 +1899,12 @@ class SlowVerbApp:
     # --- Trimming ---
 
     def enter_trim_mode(self):
-        """Activates visual waveform trim mode."""
+        """Activates visual waveform trim mode, seamlessly preserving playback head position."""
         if not self.current_filepath or not self.metadata:
             self.set_status("LOAD A TRACK BEFORE TRIMMING", is_error=True)
             return
 
+        saved_time = self.player.get_current_time() if self.player else 0.0
         if self.player and self.player.is_playing():
             self.pause()
 
@@ -1928,14 +1929,22 @@ class SlowVerbApp:
 
         self.trim_button.visible = False
         self.trim_mode_row.visible = True
-        self.seek(self.trim_head_start_sec)
+
+        # Seamlessly move playback head back to where it was
+        target_time = max(0.0, min(base_dur, saved_time))
+        self.seek(target_time)
+
         self._update_trim_heads_and_waveform()
         self._update_trim_ui()
         self.set_status("TRIM MODE ACTIVE // DRAG HEADS TO SELECT RANGE")
         self.update_ui()
 
     def cancel_trim(self):
-        """Exits trim mode without applying changes."""
+        """Exits trim mode without applying changes, keeping playback head where it was."""
+        saved_time = self.player.get_current_time() if self.player else 0.0
+        if self.player and self.player.is_playing():
+            self.pause()
+
         self.trim_mode = False
         self._active_drag_head = None
         self.trim_head_start_sec = self.effects.trim_start
@@ -1967,22 +1976,16 @@ class SlowVerbApp:
             self._current_track_samples = trimmed_samples
             self._current_track_sr = sr
             self._current_track_waveform = self.waveform
-            self.player.seek(0.0)
-            self._update_waveform_bars(playhead_ratio=0.0)
-            tot_m = int(trimmed_dur // 60)
-            tot_s = trimmed_dur % 60
-            self.time_display_text.value = f"00:00.0 / {tot_m:02d}:{tot_s:04.1f}"
+            # Keep playback head where it was
+            self.seek(saved_time)
         elif self._trim_base_waveform is not None and self._trim_base_samples is not None:
             self.waveform = self._trim_base_waveform
             self.player.load_buffer(self._trim_base_samples, self._trim_base_sr)
             self._current_track_samples = self._trim_base_samples
             self._current_track_sr = self._trim_base_sr
             self._current_track_waveform = self._trim_base_waveform
-            self.player.seek(0.0)
-            self._update_waveform_bars(playhead_ratio=0.0)
-            tot_m = int(base_dur // 60)
-            tot_s = base_dur % 60
-            self.time_display_text.value = f"00:00.0 / {tot_m:02d}:{tot_s:04.1f}"
+            # Keep playback head where it was
+            self.seek(saved_time)
 
         self.trim_button.visible = True
         self.trim_mode_row.visible = False
@@ -1992,11 +1995,16 @@ class SlowVerbApp:
         self.update_ui()
 
     def apply_trim(self):
-        """Applies trim bounds and exits trim mode."""
+        """Applies trim bounds and exits trim mode. If duration changed, moves playhead to start of new duration."""
         if not self.metadata:
             return
         if self.apply_trim_button.disabled or abs(self.trim_head_start_sec - self.trim_head_end_sec) < 1e-3:
             return
+
+        dur_before = self._get_active_duration()
+        saved_time = self.player.get_current_time() if self.player else 0.0
+        if self.player and self.player.is_playing():
+            self.pause()
 
         self.effects.trim_start = self.trim_head_start_sec
         self.effects.trim_end = self.trim_head_end_sec
@@ -2025,18 +2033,30 @@ class SlowVerbApp:
         self.trim_button.visible = True
         self.trim_mode_row.visible = False
 
-        # Reset player to 0.0 of trimmed range and update UI
-        self.player.seek(0.0)
+        base_dur = (
+            len(self._trim_base_samples) / self._trim_base_sr
+            if self._trim_base_samples is not None and self._trim_base_sr > 0
+            else (self.metadata.duration if self.metadata else 0.0)
+        )
+        duration_changed = abs(trimmed_dur - base_dur) > 1e-2
+        if duration_changed:
+            # If duration changed, move playback head back to start of new duration (0.0s)
+            self.player.seek(0.0)
+            self._update_waveform_bars(playhead_ratio=0.0)
+            tot_m = int(trimmed_dur // 60)
+            tot_s = trimmed_dur % 60
+            self.time_display_text.value = f"00:00.0 / {tot_m:02d}:{tot_s:04.1f}"
+        else:
+            # Keep playback head where it was
+            self.seek(saved_time)
+
         self._update_trim_heads_and_waveform()
         self._update_trim_ui()
-        self._update_waveform_bars(playhead_ratio=0.0)
 
-        tot_m = int(trimmed_dur // 60)
-        tot_s = trimmed_dur % 60
-        self.time_display_text.value = f"00:00.0 / {tot_m:02d}:{tot_s:04.1f}"
         if self.waveform and self.waveform.peaks:
-            peak_val = self.waveform.get_peak_at_time(0.0)
-            peak_db = self.waveform.get_peak_db_at_time(0.0)
+            cur_pos = self.player.get_current_time() if self.player else 0.0
+            peak_val = self.waveform.get_peak_at_time(cur_pos)
+            peak_db = self.waveform.get_peak_db_at_time(cur_pos)
             self.peak_display_text.value = f"PEAK: {peak_db} dB ({int(peak_val * 100)}%)"
 
         self.set_status(f"TRIM APPLIED: {trimmed_dur:.2f}s (RANGE: {self.effects.trim_start:.2f}s - {self.effects.trim_end:.2f}s)")
