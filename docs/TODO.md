@@ -14,6 +14,7 @@
 ---
 
 ## Additional Backlog Items
+- [ ] Migrate macOS PyInstaller packaging from `--onefile` to `--onedir` to resolve PyInstaller v7.0 breaking deprecation warning.
 - [ ] Add batch export feature for processing multiple tracks with selected presets.
 - [ ] Implement audio recording / microphone input capture.
 - [ ] Add customizable high-shelf EQ (treble boost / air).
