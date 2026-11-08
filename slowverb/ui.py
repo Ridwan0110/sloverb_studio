@@ -2027,7 +2027,6 @@ class SlowVerbApp:
             self.apply_trim_button.disabled = True
             self.apply_trim_button.opacity = 0.4
             self.trim_notice_text.visible = True
-            self.set_status("NOTICE: THIS IS EQUAL TO DELETING THE FILE", is_error=True)
         else:
             self.apply_trim_button.disabled = False
             self.apply_trim_button.opacity = 1.0
