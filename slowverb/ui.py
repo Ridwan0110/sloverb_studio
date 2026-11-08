@@ -6,7 +6,7 @@ import platform
 import sys
 import threading
 import time
-from typing import Callable, Any, Optional
+from typing import Callable, Any, Optional, Tuple
 
 import flet as ft
 import numpy as np
@@ -575,6 +575,10 @@ class SlowVerbApp:
         self._full_raw_samples: Optional[np.ndarray] = None
         self._full_sample_rate: int = 44100
         self._full_waveform: Optional[WaveformData] = None
+        self._rendered_full_samples: Optional[np.ndarray] = None
+        self._rendered_full_sr: int = 44100
+        self._rendered_full_waveform: Optional[WaveformData] = None
+        self._rendered_full_effects: Optional[AudioEffects] = None
         self._current_track_samples: Optional[np.ndarray] = None
         self._current_track_sr: int = 44100
         self._current_track_waveform: Optional[WaveformData] = None
@@ -1444,6 +1448,10 @@ class SlowVerbApp:
             self._full_raw_samples = raw_samples
             self._full_sample_rate = sr
             self._full_waveform = self.waveform
+            self._rendered_full_samples = raw_samples
+            self._rendered_full_sr = sr
+            self._rendered_full_waveform = self.waveform
+            self._rendered_full_effects = AudioEffects(trim_start=0.0, trim_end=self.metadata.duration)
             self._current_track_samples = raw_samples
             self._current_track_sr = sr
             self._current_track_waveform = self.waveform
@@ -1829,6 +1837,16 @@ class SlowVerbApp:
             self.pitch_slider.value = val
             self.pitch_label.value = f"{val:.2f}x"
 
+        # Update displayed duration immediately when speed changes
+        if not self.trim_mode:
+            active_dur = self._get_active_trimmed_duration()
+            tot_m = int(active_dur // 60)
+            tot_s = active_dur % 60
+            cur_t = self.player.get_current_time() if (self.player and self.player.is_playing()) else 0.0
+            cur_m = int(cur_t // 60)
+            cur_s = cur_t % 60
+            self.time_display_text.value = f"{cur_m:02d}:{cur_s:04.1f} / {tot_m:02d}:{tot_s:04.1f}"
+
         self._update_version_indicator()
         self.update_ui()
 
@@ -1892,46 +1910,144 @@ class SlowVerbApp:
         self.pitch_slider.value = self.effects.pitch
         self.pitch_label.value = f"{self.effects.pitch:.2f}x"
 
+        if not self.trim_mode:
+            active_dur = self._get_active_trimmed_duration()
+            tot_m = int(active_dur // 60)
+            tot_s = active_dur % 60
+            cur_t = self.player.get_current_time() if (self.player and self.player.is_playing()) else 0.0
+            cur_m = int(cur_t // 60)
+            cur_s = cur_t % 60
+            self.time_display_text.value = f"{cur_m:02d}:{cur_s:04.1f} / {tot_m:02d}:{tot_s:04.1f}"
+
         self.set_status(f"APPLIED PRESET: {preset.name}")
         self._update_version_indicator()
         self.update_ui()
 
-    # --- Trimming ---
+    # --- Trimming & Time Space Mapping ---
+
+    def _gui_sec_to_orig_sec(self, gui_sec: float) -> float:
+        """Converts GUI seconds (at current playback speed) to original audio file seconds."""
+        eff_speed = self.effects.speed if self.effects.speed > 0 else 1.0
+        return max(0.0, gui_sec * eff_speed)
+
+    def _orig_sec_to_gui_sec(self, orig_sec: float) -> float:
+        """Converts original audio file seconds to GUI seconds (at current playback speed)."""
+        eff_speed = self.effects.speed if self.effects.speed > 0 else 1.0
+        return max(0.0, orig_sec / eff_speed)
+
+    def _get_active_trimmed_duration(self) -> float:
+        """Returns the active trimmed duration in GUI seconds at the current speed."""
+        if not self.metadata or self.metadata.duration <= 0:
+            return 0.0
+        orig_start = max(0.0, self.effects.trim_start)
+        orig_end = (
+            min(self.metadata.duration, self.effects.trim_end)
+            if self.effects.trim_end is not None and self.effects.trim_end > 0.0
+            else self.metadata.duration
+        )
+        orig_trimmed_len = max(0.0, orig_end - orig_start)
+        return self._orig_sec_to_gui_sec(orig_trimmed_len)
+
+    def _effects_dsp_match(self, eff1: Optional[AudioEffects], eff2: Optional[AudioEffects]) -> bool:
+        """Checks if two AudioEffects have identical DSP parameters (speed, pitch, reverb, bass), ignoring trim."""
+        if eff1 is None or eff2 is None:
+            return False
+        return (
+            abs(eff1.speed - eff2.speed) < 1e-4
+            and abs(eff1.effective_pitch - eff2.effective_pitch) < 1e-4
+            and abs(eff1.reverb_percent - eff2.reverb_percent) < 1e-2
+            and abs(eff1.bass_boost_percent - eff2.bass_boost_percent) < 1e-2
+        )
+
+    def _is_default_dsp_effects(self, eff: Optional[AudioEffects]) -> bool:
+        """Checks if DSP parameters (speed, pitch, reverb, bass) are at default values."""
+        if eff is None:
+            return True
+        return (
+            abs(eff.speed - 1.0) < 1e-4
+            and abs(eff.effective_pitch - 1.0) < 1e-4
+            and abs(eff.reverb_percent) < 1e-2
+            and abs(eff.bass_boost_percent) < 1e-2
+        )
+
+    def _get_full_track_buffer(self) -> Tuple[np.ndarray, int, WaveformData]:
+        """
+        Returns (samples, sample_rate, waveform) for the entire track with active
+        DSP effects (speed, pitch, reverb, bass) applied, across the full untrimmed file duration.
+        """
+        if self._is_default_dsp_effects(self.effects) and self._full_raw_samples is not None:
+            return self._full_raw_samples, self._full_sample_rate, self._full_waveform
+
+        if (
+            self._rendered_full_samples is not None
+            and self._rendered_full_effects is not None
+            and self._effects_dsp_match(self.effects, self._rendered_full_effects)
+        ):
+            return self._rendered_full_samples, self._rendered_full_sr, self._rendered_full_waveform
+
+        if self._trim_base_samples is not None and self._trim_base_waveform is not None:
+            base_dur = len(self._trim_base_samples) / self._trim_base_sr
+            expected_full_dur = self.metadata.duration / self.effects.speed if self.metadata else base_dur
+            if abs(base_dur - expected_full_dur) < 0.05:
+                return self._trim_base_samples, self._trim_base_sr, self._trim_base_waveform
+
+        eff_full = AudioEffects(
+            speed=self.effects.speed,
+            pitch=self.effects.pitch,
+            reverb_percent=self.effects.reverb_percent,
+            bass_boost_percent=self.effects.bass_boost_percent,
+            link_pitch_to_speed=self.effects.link_pitch_to_speed,
+            trim_start=0.0,
+            trim_end=self.metadata.duration if self.metadata else None,
+        )
+        samples, sr = self.engine.render_pcm_buffer(self.current_filepath, eff_full)
+        dur = len(samples) / sr
+        wf = self.engine.extract_waveform_from_samples(
+            samples, sample_rate=sr, num_bins=self.num_wave_bars, duration=dur
+        )
+        self._rendered_full_samples = samples
+        self._rendered_full_sr = sr
+        self._rendered_full_waveform = wf
+        self._rendered_full_effects = eff_full
+        self._trim_base_samples = samples
+        self._trim_base_sr = sr
+        self._trim_base_waveform = wf
+        return samples, sr, wf
 
     def enter_trim_mode(self):
-        """Activates visual waveform trim mode, seamlessly preserving playback head position."""
+        """Activates visual waveform trim mode, displaying the full track and preserving playhead position."""
         if not self.current_filepath or not self.metadata:
             self.set_status("LOAD A TRACK BEFORE TRIMMING", is_error=True)
             return
 
-        saved_time = self.player.get_current_time() if self.player else 0.0
+        cur_play_time = self.player.get_current_time() if self.player else 0.0
         if self.player and self.player.is_playing():
             self.pause()
 
         self.trim_mode = True
 
-        # In trim mode, base the trimming on the current modified track
-        if self._trim_base_waveform is not None and self._trim_base_samples is not None:
-            self.waveform = self._trim_base_waveform
-            self.player.load_buffer(self._trim_base_samples, self._trim_base_sr)
+        full_samples, sr, full_wf = self._get_full_track_buffer()
+        full_dur = len(full_samples) / sr if sr > 0 else (self.metadata.duration / self.effects.speed)
 
-        base_dur = self._get_active_duration()
+        self.waveform = full_wf
+        self.player.load_buffer(full_samples, sr)
+        self._trim_base_samples = full_samples
+        self._trim_base_sr = sr
+        self._trim_base_waveform = full_wf
 
-        if self.effects.trim_start > 0.0:
-            self.trim_head_start_sec = min(base_dur, self.effects.trim_start)
-        else:
-            self.trim_head_start_sec = 0.0
+        # Position trim heads in GUI time based on current original-space trim bounds
+        gui_start = self._orig_sec_to_gui_sec(self.effects.trim_start)
+        orig_end = self.effects.trim_end if self.effects.trim_end is not None else self.metadata.duration
+        gui_end = self._orig_sec_to_gui_sec(orig_end)
 
-        if self.effects.trim_end is not None and self.effects.trim_end > 0.0:
-            self.trim_head_end_sec = min(base_dur, self.effects.trim_end)
-        else:
-            self.trim_head_end_sec = base_dur
+        self.trim_head_start_sec = max(0.0, min(full_dur, gui_start))
+        self.trim_head_end_sec = max(self.trim_head_start_sec, min(full_dur, gui_end))
 
         self.trim_button.visible = False
         self.trim_mode_row.visible = True
 
-        # Seamlessly move playback head back to where it was
-        target_time = max(0.0, min(base_dur, saved_time))
+        # Seamlessly map playhead position
+        target_time = max(0.0, min(full_dur, gui_start + cur_play_time))
         self.seek(target_time)
 
         self._update_trim_heads_and_waveform()
@@ -1941,51 +2057,43 @@ class SlowVerbApp:
 
     def cancel_trim(self):
         """Exits trim mode without applying changes, keeping playback head where it was."""
-        saved_time = self.player.get_current_time() if self.player else 0.0
+        saved_trim_time = self.player.get_current_time() if self.player else 0.0
         if self.player and self.player.is_playing():
             self.pause()
 
+        full_samples, sr, full_wf = self._get_full_track_buffer()
+        full_dur = len(full_samples) / sr if sr > 0 else (self.metadata.duration / self.effects.speed)
+
+        gui_start = self._orig_sec_to_gui_sec(self.effects.trim_start)
+        orig_end = self.effects.trim_end if self.effects.trim_end is not None else self.metadata.duration
+        gui_end = self._orig_sec_to_gui_sec(orig_end)
+
         self.trim_mode = False
         self._active_drag_head = None
-        self.trim_head_start_sec = self.effects.trim_start
-        self.trim_head_end_sec = (
-            self.effects.trim_end
-            if self.effects.trim_end is not None
-            else (self.metadata.duration if self.metadata else 0.0)
-        )
+        self.trim_head_start_sec = gui_start
+        self.trim_head_end_sec = gui_end
 
-        # If a trim was previously applied, restore the trimmed audio buffer & waveform
-        base_dur = (
-            len(self._trim_base_samples) / self._trim_base_sr
-            if self._trim_base_samples is not None and self._trim_base_sr > 0
-            else (self.metadata.duration if self.metadata else 0.0)
+        # Restore trimmed buffer
+        start_idx = max(0, int(gui_start * sr))
+        end_idx = min(len(full_samples), int(gui_end * sr))
+        trimmed_samples = full_samples[start_idx:end_idx]
+        trimmed_dur = len(trimmed_samples) / sr
+
+        self.player.load_buffer(trimmed_samples, sr)
+        self.waveform = self.engine.extract_waveform_from_samples(
+            trimmed_samples,
+            sample_rate=sr,
+            num_bins=self.num_wave_bars,
+            duration=trimmed_dur,
         )
-        if self._trim_base_samples is not None and (self.effects.trim_start > 0.0 or self.effects.trim_end < base_dur):
-            sr = self._trim_base_sr
-            start_idx = max(0, int(self.effects.trim_start * sr))
-            end_idx = min(len(self._trim_base_samples), int(self.effects.trim_end * sr))
-            trimmed_samples = self._trim_base_samples[start_idx:end_idx]
-            trimmed_dur = max(0.0, self.effects.trim_end - self.effects.trim_start)
-            self.player.load_buffer(trimmed_samples, sr)
-            self.waveform = self.engine.extract_waveform_from_samples(
-                trimmed_samples,
-                sample_rate=sr,
-                num_bins=self.num_wave_bars,
-                duration=trimmed_dur,
-            )
-            self._current_track_samples = trimmed_samples
-            self._current_track_sr = sr
-            self._current_track_waveform = self.waveform
-            # Keep playback head where it was
-            self.seek(saved_time)
-        elif self._trim_base_waveform is not None and self._trim_base_samples is not None:
-            self.waveform = self._trim_base_waveform
-            self.player.load_buffer(self._trim_base_samples, self._trim_base_sr)
-            self._current_track_samples = self._trim_base_samples
-            self._current_track_sr = self._trim_base_sr
-            self._current_track_waveform = self._trim_base_waveform
-            # Keep playback head where it was
-            self.seek(saved_time)
+        self._current_track_samples = trimmed_samples
+        self._current_track_sr = sr
+        self._current_track_waveform = self.waveform
+
+        # Seamlessly map playback head: saved_trim_time was in full buffer,
+        # so in trimmed buffer it is saved_trim_time - gui_start
+        rel_pos = max(0.0, min(trimmed_dur, saved_trim_time - gui_start))
+        self.seek(rel_pos)
 
         self.trim_button.visible = True
         self.trim_mode_row.visible = False
@@ -2002,20 +2110,25 @@ class SlowVerbApp:
             return
 
         dur_before = self._get_active_duration()
-        saved_time = self.player.get_current_time() if self.player else 0.0
+        saved_trim_time = self.player.get_current_time() if self.player else 0.0
         if self.player and self.player.is_playing():
             self.pause()
 
-        self.effects.trim_start = self.trim_head_start_sec
-        self.effects.trim_end = self.trim_head_end_sec
-        trimmed_dur = max(0.0, self.effects.trim_end - self.effects.trim_start)
+        # Save trim bounds in ORIGINAL FILE SECONDS
+        orig_start = min(self.metadata.duration, self._gui_sec_to_orig_sec(self.trim_head_start_sec))
+        orig_end = min(self.metadata.duration, self._gui_sec_to_orig_sec(self.trim_head_end_sec))
+        self.effects.trim_start = orig_start
+        self.effects.trim_end = orig_end
+        self.trim_start_field.value = f"{orig_start:.2f}"
+        self.trim_end_field.value = f"{orig_end:.2f}"
 
-        # Slice PCM samples and re-bin waveform peaks for the trimmed region
-        if self._trim_base_samples is not None and len(self._trim_base_samples) > 0:
-            sr = self._trim_base_sr
-            start_idx = max(0, int(self.effects.trim_start * sr))
-            end_idx = min(len(self._trim_base_samples), int(self.effects.trim_end * sr))
-            trimmed_samples = self._trim_base_samples[start_idx:end_idx]
+        trimmed_dur = max(0.0, self.trim_head_end_sec - self.trim_head_start_sec)
+
+        full_samples, sr, full_wf = self._get_full_track_buffer()
+        if full_samples is not None and len(full_samples) > 0:
+            start_idx = max(0, int(self.trim_head_start_sec * sr))
+            end_idx = min(len(full_samples), int(self.trim_head_end_sec * sr))
+            trimmed_samples = full_samples[start_idx:end_idx]
 
             self.player.load_buffer(trimmed_samples, sr)
             self.waveform = self.engine.extract_waveform_from_samples(
@@ -2033,22 +2146,16 @@ class SlowVerbApp:
         self.trim_button.visible = True
         self.trim_mode_row.visible = False
 
-        base_dur = (
-            len(self._trim_base_samples) / self._trim_base_sr
-            if self._trim_base_samples is not None and self._trim_base_sr > 0
-            else (self.metadata.duration if self.metadata else 0.0)
-        )
-        duration_changed = abs(trimmed_dur - base_dur) > 1e-2
+        duration_changed = abs(trimmed_dur - dur_before) > 1e-2
         if duration_changed:
-            # If duration changed, move playback head back to start of new duration (0.0s)
             self.player.seek(0.0)
             self._update_waveform_bars(playhead_ratio=0.0)
             tot_m = int(trimmed_dur // 60)
             tot_s = trimmed_dur % 60
             self.time_display_text.value = f"00:00.0 / {tot_m:02d}:{tot_s:04.1f}"
         else:
-            # Keep playback head where it was
-            self.seek(saved_time)
+            rel_time = max(0.0, min(trimmed_dur, saved_trim_time - self.trim_head_start_sec))
+            self.seek(rel_time)
 
         self._update_trim_heads_and_waveform()
         self._update_trim_ui()
@@ -2146,7 +2253,16 @@ class SlowVerbApp:
 
         def background_render():
             try:
-                samples, sr = self.engine.render_pcm_buffer(self.current_filepath, self.effects)
+                # Render full track with active DSP effects (speed, pitch, reverb, bass)
+                full_samples, sr, full_wf = self._get_full_track_buffer()
+
+                # Slice to active trimmed region in GUI seconds
+                gui_start = self._orig_sec_to_gui_sec(self.effects.trim_start)
+                orig_end = self.effects.trim_end if self.effects.trim_end is not None else self.metadata.duration
+                gui_end = self._orig_sec_to_gui_sec(orig_end)
+                start_idx = max(0, int(gui_start * sr))
+                end_idx = min(len(full_samples), int(gui_end * sr))
+                samples = full_samples[start_idx:end_idx]
                 eff_dur = len(samples) / sr
 
                 # 1. Extract new waveform from rendered samples so PEEK card displays actual preview peaks
@@ -2169,9 +2285,9 @@ class SlowVerbApp:
                 self._current_track_samples = samples
                 self._current_track_sr = sr
                 self._current_track_waveform = self.waveform
-                self._trim_base_samples = samples
+                self._trim_base_samples = full_samples
                 self._trim_base_sr = sr
-                self._trim_base_waveform = self.waveform
+                self._trim_base_waveform = full_wf
                 self._rendered_effects = AudioEffects(
                     speed=self.effects.speed,
                     pitch=self.effects.pitch,

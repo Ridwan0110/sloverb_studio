@@ -404,6 +404,73 @@ def test_gui_visual_trim_playhead_persistence(app, sample_sine_audio):
     assert abs(app.player.get_current_time() - 1.2) < 0.05
 
 
+def test_gui_visual_trim_speed_scaling_and_reextend(app, sample_sine_audio):
+    """
+    Verify the complete speed scaling & non-destructive extend flow reported by user:
+    1. Load track (duration ~3.0s).
+    2. Set 1.2x speed (duration ~2.5s).
+    3. Enter trim mode: full duration at 1.2x is ~2.5s.
+    4. Move start head 0.5s forward -> Apply: duration is ~2.0s.
+    5. Change speed back to 1.0x: duration immediately scales to ~2.4s.
+    6. Enter trim mode: full track is restored (~3.0s), start head is at ~0.6s, end head is at ~3.0s.
+    7. User can drag start head back to 0.0s to re-extend audio duration -> Apply: duration restored to ~3.0s.
+    """
+    app.load_file(sample_sine_audio)
+    orig_dur = app.metadata.duration
+
+    # 1. Apply 1.2x speed
+    app.speed_slider.value = 1.2
+    app._on_speed_changed(None)
+    assert app.effects.speed == 1.2
+
+    # 2. Enter trim mode at 1.2x speed
+    app.enter_trim_mode()
+    dur_at_1_2 = orig_dur / 1.2
+    assert abs(app.waveform.duration - dur_at_1_2) < 0.05
+    assert abs(app.player.get_duration() - dur_at_1_2) < 0.05
+    assert abs(app.trim_head_start_sec - 0.0) < 0.05
+    assert abs(app.trim_head_end_sec - dur_at_1_2) < 0.05
+
+    # 3. Move start head 0.5s forward
+    app.trim_head_start_sec = 0.5
+    app.apply_trim()
+
+    # In original file coordinates: trim_start is 0.5 * 1.2 = 0.6s, trim_end is orig_dur
+    assert abs(app.effects.trim_start - 0.6) < 0.05
+    assert abs(app.effects.trim_end - orig_dur) < 0.05
+    trimmed_dur_1_2 = dur_at_1_2 - 0.5
+    assert abs(app.player.get_duration() - trimmed_dur_1_2) < 0.05
+
+    # 4. Modify speed back to 1.0x
+    app.speed_slider.value = 1.0
+    app._on_speed_changed(None)
+    assert app.effects.speed == 1.0
+
+    # The active trimmed duration at 1.0x should be (orig_dur - 0.6) / 1.0
+    expected_dur_1_0 = orig_dur - 0.6
+    tot_m = int(expected_dur_1_0 // 60)
+    tot_s = expected_dur_1_0 % 60
+    assert f"{tot_m:02d}:{tot_s:04.1f}" in app.time_display_text.value
+
+    # 5. Re-enter trim mode at 1.0x speed
+    app.enter_trim_mode()
+    # Entire track (~3.0s) is visible in waveform & player
+    assert abs(app.waveform.duration - orig_dur) < 0.05
+    assert abs(app.player.get_duration() - orig_dur) < 0.05
+    # Heads reflect current trim bounds in 1.0x time: start at 0.6s, end at orig_dur
+    assert abs(app.trim_head_start_sec - 0.6) < 0.05
+    assert abs(app.trim_head_end_sec - orig_dur) < 0.05
+
+    # 6. Extend audio duration outwards: drag start head back to 0.0s
+    app.trim_head_start_sec = 0.0
+    app.apply_trim()
+
+    # Entire original audio is restored
+    assert abs(app.player.get_duration() - orig_dur) < 0.05
+    assert abs(app.effects.trim_start - 0.0) < 0.05
+    assert abs(app.effects.trim_end - orig_dur) < 0.05
+
+
 def test_gui_trim_buttons(app, sample_sine_audio):
     """Verify legacy trim methods for compatibility."""
     app.load_file(sample_sine_audio)
