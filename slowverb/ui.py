@@ -425,6 +425,15 @@ class FFmpegSetupView(ft.Container):
             spacing=12,
         )
 
+        from slowverb.platform import is_mobile_platform
+        if is_mobile_platform(self.target_page):
+            self.header_title.value = "NATIVE AUDIO CORE MISSING"
+            self.prompt_text.value = "FFmpeg audio libraries (flet-libffmpeg / PyAV) are not bundled in this APK."
+            self.status_label.value = "PLEASE REINSTALL APK WITH BUNDLED LIBRARIES"
+            self.btn_download_text.value = "NOT AVAILABLE ON MOBILE"
+            self.btn_download.opacity = 0.5
+            self.btn_download.on_click = None
+
         card_content = ft.Column(
             [
                 header_row,
@@ -484,6 +493,14 @@ class FFmpegSetupView(ft.Container):
     def _on_download_click(self, e):
         """Triggers the FFmpeg download in a background thread."""
         if self.is_downloading:
+            return
+
+        from slowverb.platform import is_mobile_platform
+        if is_mobile_platform(self.target_page):
+            self.status_label.value = "DOWNLOAD NOT AVAILABLE ON MOBILE"
+            self.detail_label.value = "PLEASE INSTALL AN APK WITH BUNDLED LIBRARIES (FLET-LIBFFMPEG / PYAV)"
+            self.detail_label.visible = True
+            self._safe_update()
             return
 
         self.is_downloading = True
@@ -553,7 +570,16 @@ class SlowVerbApp:
         else:
             self.debug_mode: bool = bool(getattr(slowverb, "DEBUG_MODE", False)) or (os.environ.get("SLOVERB_DEBUG") in ("1", "true", "True"))
 
-        self.ffmpeg_path: Optional[str] = ffmpeg_path or find_ffmpeg()
+        if ffmpeg_path:
+            self.ffmpeg_path: Optional[str] = ffmpeg_path
+        else:
+            from slowverb.platform import is_mobile_platform
+            if is_mobile_platform(self.page):
+                from slowverb.ffmpeg import get_ffmpeg_provider
+                provider = get_ffmpeg_provider(page=self.page)
+                self.ffmpeg_path: Optional[str] = provider.get_binary_path()
+            else:
+                self.ffmpeg_path: Optional[str] = find_ffmpeg()
         self.engine: Optional[AudioEngine] = None
         self.player: Optional[AudioPlayer] = None
 
@@ -629,7 +655,7 @@ class SlowVerbApp:
             self._mount_debug_overlay()
 
         if self.ffmpeg_path:
-            self.engine = AudioEngine(self.ffmpeg_path)
+            self.engine = AudioEngine(self.ffmpeg_path, page=self.page)
             self.player = create_audio_player(page=self.page, on_playback_finished=self._on_playback_end)
             self._init_controls()
             if self.page:
@@ -638,7 +664,7 @@ class SlowVerbApp:
             if self.page:
                 self._setup_ffmpeg_page()
             else:
-                self.engine = AudioEngine(auto_ensure=True)
+                self.engine = AudioEngine(auto_ensure=True, page=self.page)
                 self.player = create_audio_player(page=self.page, on_playback_finished=self._on_playback_end)
                 self._init_controls()
 
