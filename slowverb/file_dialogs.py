@@ -98,9 +98,15 @@ class FileService:
                 allow_multiple=False,
             )
 
-    def save_exported_file(self, temp_exported_path: str, default_filename: str):
+    def save_exported_file(
+        self,
+        temp_exported_path: str,
+        default_filename: str,
+        allowed_extensions: Optional[List[str]] = None,
+        dialog_title: str = "SAVE EXPORTED TRACK",
+    ):
         """
-        Saves or shares an exported track. On mobile, triggers FilePicker save dialog
+        Saves or shares an exported track or file. On mobile, triggers FilePicker save dialog
         or native save action, copying from the temp export cache.
         """
         self._pending_export_path = temp_exported_path
@@ -124,9 +130,9 @@ class FileService:
         if self._file_picker is not None:
             self._dispatch_async(
                 self._file_picker.save_file,
-                dialog_title="SAVE EXPORTED TRACK",
+                dialog_title=dialog_title,
                 file_name=default_filename,
-                allowed_extensions=AUDIO_EXTENSIONS,
+                allowed_extensions=allowed_extensions or AUDIO_EXTENSIONS,
             )
         else:
             # Fallback if no picker attached
