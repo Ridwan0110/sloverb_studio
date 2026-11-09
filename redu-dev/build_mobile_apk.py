@@ -77,7 +77,14 @@ def run_build():
         "--project", "sloverb_studio",
         "--org", "com.redu.sloverb",
         "--product", "SloVerb Studio",
-        "--module-name", "sloverb_studio.py"
+        "--module-name", "sloverb_studio.py",
+        "--exclude", "ffmpeg",
+        "--exclude", "dist",
+        "--exclude", "tests",
+        "--exclude", "redu-dev",
+        "--exclude", "SloVerbStudio.spec",
+        "--exclude", "SloVerbStudioTest.spec",
+        "--exclude", "docs",
     ]
     print(f">> Executing: {' '.join(cmd)}")
     subprocess.run(cmd)
