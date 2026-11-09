@@ -104,7 +104,12 @@ def run_build(args: Optional[argparse.Namespace] = None) -> int:
 
     flet_exe = shutil.which("flet")
     if not flet_exe:
-        flet_exe = sys.executable.replace("python.exe", "flet.exe")
+        bin_dir = Path(sys.executable).parent
+        candidate = bin_dir / ("flet.exe" if sys.platform == "win32" else "flet")
+        if candidate.is_file():
+            flet_exe = str(candidate)
+        else:
+            flet_exe = "flet"
 
     print(f">> Flet CLI: {flet_exe}")
     cmd = [
@@ -132,9 +137,15 @@ def run_build(args: Optional[argparse.Namespace] = None) -> int:
             print("[DRY-RUN] Would bake DEBUG_MODE = True into slowverb/__init__.py")
         return 0
 
-    with bake_debug_mode(_REPO_ROOT, enabled=getattr(args, "debug", False)):
-        res = subprocess.run(cmd)
-        return res.returncode
+    repo_root = _REPO_ROOT
+    orig_cwd = os.getcwd()
+    try:
+        os.chdir(str(repo_root))
+        with bake_debug_mode(repo_root, enabled=getattr(args, "debug", False)):
+            res = subprocess.run(cmd)
+            return res.returncode
+    finally:
+        os.chdir(orig_cwd)
 
 
 if __name__ == "__main__":
