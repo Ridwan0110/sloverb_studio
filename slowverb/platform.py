@@ -58,6 +58,15 @@ def detect_platform(page: Optional[ft.Page] = None) -> PlatformType:
     return PlatformType.DESKTOP
 
 
+def is_mobile_platform(page: Optional[ft.Page] = None) -> bool:
+    """
+    Returns True ONLY if the application is running on a real mobile operating system
+    (Android or iOS), where native desktop drivers like sounddevice and tkinter are unavailable.
+    """
+    plat = detect_platform(page)
+    return plat in (PlatformType.ANDROID, PlatformType.IOS)
+
+
 def is_mobile_environment(page: Optional[ft.Page] = None) -> bool:
     """
     Returns True if the application is executing on a mobile OS (Android/iOS),

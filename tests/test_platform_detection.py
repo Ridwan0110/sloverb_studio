@@ -10,6 +10,7 @@ from slowverb.platform import (
     detect_platform,
     get_android_abi,
     is_mobile_environment,
+    is_mobile_platform,
 )
 
 
@@ -60,3 +61,17 @@ def test_get_android_abi():
         assert get_android_abi() == "x86_64"
     with patch("platform.machine", return_value="armv7l"):
         assert get_android_abi() == "armeabi-v7a"
+
+
+def test_is_mobile_platform():
+    android_page = MagicMock(platform=ft.PagePlatform.ANDROID)
+    ios_page = MagicMock(platform=ft.PagePlatform.IOS)
+    desktop_page = MagicMock(platform=ft.PagePlatform.WINDOWS, width=400)
+
+    assert is_mobile_platform(android_page) is True
+    assert is_mobile_platform(ios_page) is True
+    assert is_mobile_platform(desktop_page) is False
+
+    with patch.dict(os.environ, {"SLOVERB_MOBILE_UI": "1"}):
+        assert is_mobile_platform(desktop_page) is False
+        assert is_mobile_environment(desktop_page) is True
