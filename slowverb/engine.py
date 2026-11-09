@@ -181,7 +181,9 @@ class AudioEngine:
 
             sr = stream.rate or 44100
             channels = getattr(stream, "channels", 2) or 2
-            bitrate = stream.bit_rate or 0
+            bitrate = stream.bit_rate or getattr(container, "bit_rate", 0) or 0
+            if bitrate > 1000:
+                bitrate = int(bitrate // 1000)
             fmt_name = os.path.splitext(filepath)[1].lstrip(".").lower()
             metadata = container.metadata or {}
             title = metadata.get("title") or os.path.splitext(os.path.basename(filepath))[0]
@@ -295,6 +297,12 @@ class AudioEngine:
                 resampled = resampler.resample(frame)
                 for r in resampled:
                     chunks.append(r.to_ndarray().flatten())
+            try:
+                flushed = resampler.resample(None)
+                for r in flushed:
+                    chunks.append(r.to_ndarray().flatten())
+            except Exception:
+                pass
 
             if not chunks:
                 return WaveformData(peaks=[0.0] * num_bins, duration=duration)
@@ -704,8 +712,9 @@ class AudioEngine:
                     out_s = out_c.add_stream("pcm_s16le", rate=target_rate, layout="stereo")
 
                 samples_seen = 0
+                stream_rate = in_s.rate or target_rate or 44100
                 for frame in in_c.decode(in_s):
-                    frame_time = float(frame.time) if frame.time is not None else samples_seen / in_s.rate
+                    frame_time = float(frame.time) if frame.time is not None else samples_seen / stream_rate
                     samples_seen += frame.samples
                     if frame_time < effects.trim_start:
                         continue
@@ -902,8 +911,9 @@ class AudioEngine:
             samples_collected = 0
 
             samples_seen = 0
+            stream_rate = in_s.rate or target_sample_rate or 44100
             for frame in in_c.decode(in_s):
-                frame_time = float(frame.time) if frame.time is not None else samples_seen / in_s.rate
+                frame_time = float(frame.time) if frame.time is not None else samples_seen / stream_rate
                 samples_seen += frame.samples
                 if frame_time < effects.trim_start:
                     continue
