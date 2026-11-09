@@ -132,6 +132,8 @@ def test_build_mobile_apk_arguments_and_dry_run():
 
     ret = build_mobile_apk.run_build(args_debug)
     assert ret == 0
+    assert "-Dorg.gradle.parallel=false" in os.environ.get("GRADLE_OPTS", "")
+    assert "-Dorg.gradle.workers.max=1" in os.environ.get("GRADLE_OPTS", "")
 
 
 def test_build_timer_lifecycle_and_formatting():
