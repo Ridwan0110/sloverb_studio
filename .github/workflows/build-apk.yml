@@ -49,8 +49,6 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Execute Android APK Builder
-        env:
-          GRADLE_OPTS: "-Dorg.gradle.parallel=false -Dorg.gradle.workers.max=1"
         run: |
           DEBUG_FLAG=""
           if [ "${{ github.event.inputs.debug_mode }}" = "true" ]; then
