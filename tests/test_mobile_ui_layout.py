@@ -46,6 +46,20 @@ def test_build_ui_routing_mobile():
     # Left is Load button, right is status container
     assert len(row_1.controls) == 2
 
+    status_container = row_1.controls[1]
+    assert isinstance(status_container, ft.Container)
+    status_col = status_container.content
+    assert isinstance(status_col, ft.Column)
+    # 2 rows in 1 column: Row 0 is text status + copy button, Row 1 is box status
+    assert len(status_col.controls) == 2
+    mobile_text_row = status_col.controls[0]
+    mobile_box_row = status_col.controls[1]
+    assert isinstance(mobile_text_row, ft.Row)
+    assert isinstance(mobile_box_row, ft.Row)
+    assert app.status_banner in mobile_text_row.controls
+    assert app.copy_error_button in mobile_text_row.controls
+    assert app.version_indicator_container in mobile_box_row.controls
+
     row_2 = top_bar_column.controls[1]
     assert isinstance(row_2, ft.Row)
     assert len(row_2.controls) == 2
@@ -100,6 +114,53 @@ def test_adaptive_waveform_bars():
     app._adapt_waveform_bars(1120.0)
     assert app.num_wave_bars == 90
     assert len(app.wave_bar_containers) == 90
+
+
+def test_mobile_status_banner_formatting():
+    """Verify mobile status text scaling (up to 4px reduction), 3-line clamp, and ellipsis truncation."""
+    page = MagicMock()
+    page.platform = ft.PagePlatform.ANDROID
+    page.width = 390
+    page.overlay = []
+
+    app = SlowVerbApp(page=page)
+    app.build_ui()
+
+    # 1. Short message: base size 12
+    app.set_status("SYSTEM READY")
+    assert app.status_banner.size == 12
+    assert app.status_banner.value == ">> SYSTEM READY"
+    assert app.status_banner.max_lines == 3
+
+    # 2. Medium message fitting with minor font reduction (e.g. 10 or 11)
+    app.set_status("FILE PROCESSING COMPLETE WITH SPECIAL DSP FILTER APPLICATION ACTIVE IN BUFFER")
+    assert 8 <= app.status_banner.size <= 12
+    assert ">> FILE PROCESSING COMPLETE" in app.status_banner.value
+
+    # 3. Very long error requiring maximum 4px reduction and ellipsis
+    long_error = "A" * 300
+    app.set_status(long_error, is_error=True)
+    assert app.status_banner.size == 8  # 12 - 4 = 8 minimum
+    assert app.status_banner.value.endswith("...")
+    assert app.copy_error_button.visible is True
+    # The full error is preserved for copying
+    assert app._last_error == long_error
+
+
+def test_desktop_status_banner_unconstrained():
+    """Verify desktop status text remains at default size 12 without 3-line mobile clamp."""
+    page = MagicMock()
+    page.platform = ft.PagePlatform.WINDOWS
+    page.width = 1120
+    page.overlay = []
+
+    app = SlowVerbApp(page=page)
+    app.build_ui()
+
+    long_msg = "VERY LONG MESSAGE ON DESKTOP " * 5
+    app.set_status(long_msg)
+    assert app.status_banner.size == 12
+    assert app.status_banner.max_lines is None
 
 
 def test_show_export_format_dialog():

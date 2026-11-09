@@ -1514,25 +1514,35 @@ class SlowVerbApp:
             expand=2,
         )
 
-        self.status_row = ft.Row([
+        mobile_status_text_row = ft.Row([
             self.status_banner,
-            self.version_indicator_container,
+            self.copy_error_button,
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+        mobile_status_box_row = ft.Row([
+            self.version_indicator_container,
+        ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
         status_container = ft.Container(
             content=ft.Column([
-                self.status_row,
-                self.status_error_row,
+                mobile_status_text_row,
+                mobile_status_box_row,
             ], spacing=4),
             bgcolor=COLOR_SURFACE,
             border=ft.Border.all(width=1, color=COLOR_BORDER),
             border_radius=ft.BorderRadius.all(2),
             padding=ft.Padding.symmetric(horizontal=8, vertical=6),
-            alignment=ft.Alignment.CENTER,
             expand=8,
         )
 
-        top_row_1 = ft.Row([load_button, status_container], spacing=8, alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+        self.status_row = mobile_status_text_row
+
+        top_row_1 = ft.Row(
+            [load_button, status_container],
+            spacing=8,
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
 
         # Static Top Bar Row 2: Playback Controls & Trim (Left) + Render (Right)
         playback_controls = ft.Row([
@@ -2787,11 +2797,68 @@ class SlowVerbApp:
             self.update_ui()
             return None
 
+    def _format_status_message(self, message: str, is_error: bool = False) -> tuple[str, int]:
+        """
+        Formats status text for the active viewport.
+        On mobile:
+          - Target maximum of 3 lines.
+          - Decreases font size by up to 4px (from 12 down to 8) to fit within 3 lines.
+          - If text still exceeds 3 lines at minimum size 8, truncates with '...'.
+        On desktop:
+          - Returns full text at default size 12.
+        """
+        full_text = f">> {message.upper()}"
+        from slowverb.platform import is_mobile_environment
+        is_mobile = getattr(self, "force_mobile_ui", False) or is_mobile_environment(self.page)
+
+        if not is_mobile:
+            return full_text, 12
+
+        # Mobile top row text constraints
+        base_size = 12
+        min_size = 8  # 12 - 4px maximum reduction
+        available_width = 200.0 if is_error else 275.0
+
+        def estimate_lines(text: str, font_size: int) -> int:
+            chars_per_line = max(10, int(available_width / (0.6 * font_size)))
+            lines = 0
+            for part in text.split("\n"):
+                if not part:
+                    lines += 1
+                else:
+                    lines += max(1, (len(part) + chars_per_line - 1) // chars_per_line)
+            return lines
+
+        # 1. Try fitting within 3 lines by reducing font size by up to 4px
+        for sz in range(base_size, min_size - 1, -1):
+            if estimate_lines(full_text, sz) <= 3:
+                return full_text, sz
+
+        # 2. If 4px reduction is not enough, truncate at min_size (8px) with '...'
+        chars_per_line = max(10, int(available_width / (0.6 * min_size)))
+        max_chars = chars_per_line * 3
+        if len(full_text) > max_chars:
+            truncated = full_text[: max_chars - 3].rstrip() + "..."
+            return truncated, min_size
+
+        return full_text, min_size
+
     def set_status(self, message: str, is_error: bool = False):
         """Updates the status footer banner and toggles copy error button."""
+        from slowverb.platform import is_mobile_environment
+        is_mobile = getattr(self, "force_mobile_ui", False) or is_mobile_environment(self.page)
+        text_val, font_sz = self._format_status_message(message, is_error=is_error)
+
         if hasattr(self, "status_banner") and self.status_banner:
-            self.status_banner.value = f">> {message.upper()}"
+            self.status_banner.value = text_val
+            self.status_banner.size = font_sz
             self.status_banner.color = COLOR_RED if is_error else COLOR_ACCENT
+            if is_mobile:
+                self.status_banner.max_lines = 3
+                self.status_banner.overflow = ft.TextOverflow.ELLIPSIS
+            else:
+                self.status_banner.max_lines = None
+                self.status_banner.overflow = None
 
         if hasattr(self, "copy_error_button") and self.copy_error_button:
             if is_error:
