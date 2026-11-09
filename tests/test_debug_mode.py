@@ -20,6 +20,20 @@ from slowverb.debug import (
 )
 from slowverb.ui import SlowVerbApp
 from sloverb_studio import parse_cli_args
+from tests.test_entry_point import MockPage
+
+
+@pytest.fixture(autouse=True)
+def clean_debug_env():
+    """Ensures DEBUG_MODE and SLOVERB_DEBUG do not leak across test suites."""
+    orig_mode = slowverb.DEBUG_MODE
+    orig_env = os.environ.get("SLOVERB_DEBUG")
+    yield
+    slowverb.DEBUG_MODE = orig_mode
+    if orig_env is not None:
+        os.environ["SLOVERB_DEBUG"] = orig_env
+    else:
+        os.environ.pop("SLOVERB_DEBUG", None)
 
 
 def test_debug_mode_defaults_and_cli_toggle(monkeypatch):
@@ -118,21 +132,50 @@ def test_debug_button_initialization_and_visibility():
     assert app_on.debug_button.content.value == FA_BUG
 
 
-def test_debug_button_in_ui_layouts():
-    """Verifies that debug_button is included in both desktop and mobile header rows."""
-    app = SlowVerbApp(page=None, debug_mode=True)
+def test_debug_button_overlay_mounting():
+    """Verifies that debug_button is mounted in page.overlay when debug_mode is True and absent when False."""
+    page_off = MockPage()
+    app_off = SlowVerbApp(page=page_off, debug_mode=False)
+    assert app_off.debug_mode is False
+    assert len(page_off.overlay) == 0
 
-    # Desktop header
-    desktop_layout = app.build_desktop_ui()
-    header_row = desktop_layout.controls[0]
-    right_header_row = header_row.controls[1]
-    assert app.debug_button in right_header_row.controls
+    page_on = MockPage()
+    app_on = SlowVerbApp(page=page_on, debug_mode=True)
+    assert app_on.debug_mode is True
+    assert app_on.debug_button in page_on.overlay
+    assert app_on.debug_button.visible is True
+    assert app_on.debug_button.content.value == FA_BUG
+    assert app_on.debug_button.top == 12
+    assert app_on.debug_button.right == 14
 
-    # Mobile header
-    mobile_layout = app.build_mobile_ui()
-    mobile_header = mobile_layout.controls[0]
-    mobile_right_header = mobile_header.controls[1]
-    assert app.debug_button in mobile_right_header.controls
+
+def test_debug_button_present_in_overlay_on_ffmpeg_missing():
+    """Verifies debug button is mounted in page.overlay even when FFmpeg is missing (FFmpegSetupView)."""
+    mock_page = MockPage()
+    with patch("slowverb.ui.find_ffmpeg", return_value=None):
+        app = SlowVerbApp(page=mock_page, ffmpeg_path=None, debug_mode=True)
+        assert app.ffmpeg_setup_view is not None
+        assert app.debug_button in mock_page.overlay
+        assert app.debug_button.visible is True
+
+
+def test_debug_dump_when_ffmpeg_missing(tmp_path):
+    """Verifies debug dump can be generated and saved while on the FFmpeg missing setup screen."""
+    mock_page = MockPage()
+    with patch("slowverb.ui.find_ffmpeg", return_value=None):
+        app = SlowVerbApp(page=mock_page, ffmpeg_path=None, debug_mode=True)
+        target_json = str(tmp_path / "ffmpeg_missing_dump.json")
+
+        with patch("slowverb.ui.save_file_desktop", return_value=target_json):
+            app._on_debug_dump_clicked()
+
+        assert os.path.isfile(target_json)
+        with open(target_json, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert data["ffmpeg"]["exists"] is False
+        assert data["ffmpeg"]["location"] is None
+        assert "DEBUG REPORT SAVED" in app.ffmpeg_setup_view.detail_label.value
 
 
 def test_debug_dump_desktop_save_flow(tmp_path):

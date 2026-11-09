@@ -624,6 +624,10 @@ class SlowVerbApp:
         self.mobile_effects_view = None
         self.mobile_tab_switcher = None
 
+        self._init_debug_button()
+        if self.page:
+            self._mount_debug_overlay()
+
         if self.ffmpeg_path:
             self.engine = AudioEngine(self.ffmpeg_path)
             self.player = create_audio_player(page=self.page, on_playback_finished=self._on_playback_end)
@@ -637,6 +641,37 @@ class SlowVerbApp:
                 self.engine = AudioEngine(auto_ensure=True)
                 self.player = create_audio_player(page=self.page, on_playback_finished=self._on_playback_end)
                 self._init_controls()
+
+    def _init_debug_button(self):
+        """Initializes the floating debug button for page.overlay."""
+        self.debug_button = ft.Container(
+            content=ft.Text(
+                FA_BUG,
+                font_family=FONT_AWESOME_FONT,
+                size=11,
+                color=COLOR_AMBER,
+            ),
+            bgcolor=COLOR_SURFACE_LIGHT,
+            border=ft.Border.all(width=1, color=COLOR_AMBER),
+            shape=ft.BoxShape.CIRCLE,
+            width=26,
+            height=26,
+            top=12,
+            right=14,
+            alignment=ft.Alignment.CENTER,
+            tooltip="DUMP DIAGNOSTICS JSON",
+            on_click=lambda e: self._on_debug_dump_clicked(),
+            ink=True,
+            visible=self.debug_mode,
+        )
+
+    def _mount_debug_overlay(self):
+        """Mounts the debug button in page.overlay if debug mode is active."""
+        if not self.debug_mode or not self.page:
+            return
+        if hasattr(self.page, "overlay") and isinstance(self.page.overlay, list):
+            if self.debug_button not in self.page.overlay:
+                self.page.overlay.append(self.debug_button)
 
     def update_ui(self):
         """Thread-safe UI update wrapper ensuring updates are executed on the Page's event loop."""
@@ -777,6 +812,7 @@ class SlowVerbApp:
             self.page.on_resize = self._on_page_resize
 
         self.page.add(self.build_ui())
+        self._mount_debug_overlay()
         self.page.update()
 
 
@@ -813,6 +849,7 @@ class SlowVerbApp:
             padding=ft.Padding.only(top=30),
         )
         self.page.add(center_wrapper)
+        self._mount_debug_overlay()
         self.page.update()
 
     def _on_ffmpeg_installed(self, binary_path: str):
@@ -889,24 +926,8 @@ class SlowVerbApp:
             weight=ft.FontWeight.BOLD,
         )
 
-        self.debug_button = ft.Container(
-            content=ft.Text(
-                FA_BUG,
-                font_family=FONT_AWESOME_FONT,
-                size=11,
-                color=COLOR_AMBER,
-            ),
-            bgcolor=COLOR_SURFACE_LIGHT,
-            border=ft.Border.all(width=1, color=COLOR_AMBER),
-            shape=ft.BoxShape.CIRCLE,
-            width=24,
-            height=24,
-            alignment=ft.Alignment.CENTER,
-            tooltip="DUMP DIAGNOSTICS JSON",
-            on_click=lambda e: self._on_debug_dump_clicked(),
-            ink=True,
-            visible=self.debug_mode,
-        )
+        if not hasattr(self, "debug_button") or self.debug_button is None:
+            self._init_debug_button()
 
         # Waveform peeking and timeline info
         self.time_display_text = ft.Text(
@@ -1356,7 +1377,7 @@ class SlowVerbApp:
             ft.Row([
                 self.format_badge_text,
                 self.version_badge_text,
-                self.debug_button,
+                ft.Container(width=30 if self.debug_mode else 0),
             ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
@@ -1532,7 +1553,7 @@ class SlowVerbApp:
             ft.Row([
                 self.format_badge_text,
                 self.version_badge_text,
-                self.debug_button,
+                ft.Container(width=28 if self.debug_mode else 0),
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
@@ -3013,6 +3034,10 @@ class SlowVerbApp:
                     with open(save_path, "w", encoding="utf-8") as f:
                         f.write(json_str)
                     self.set_status(f"DEBUG REPORT SAVED: '{os.path.basename(save_path)}'")
+                    if hasattr(self, "ffmpeg_setup_view") and self.ffmpeg_setup_view and hasattr(self.ffmpeg_setup_view, "detail_label"):
+                        self.ffmpeg_setup_view.detail_label.value = f">> DEBUG REPORT SAVED: '{os.path.basename(save_path)}'"
+                        self.ffmpeg_setup_view.detail_label.color = COLOR_ACCENT
+                        self.ffmpeg_setup_view._safe_update()
                     if getattr(self, "_diagnostic_logger", None):
                         self._diagnostic_logger.log(f"Debug report saved to {save_path}")
             else:
@@ -3033,6 +3058,10 @@ class SlowVerbApp:
                     self.set_status(f"DEBUG REPORT SAVED: '{temp_path}'")
         except Exception as ex:
             self.set_status(f"DEBUG DUMP FAILED: {str(ex).upper()}", is_error=True)
+            if hasattr(self, "ffmpeg_setup_view") and self.ffmpeg_setup_view and hasattr(self.ffmpeg_setup_view, "detail_label"):
+                self.ffmpeg_setup_view.detail_label.value = f">> DEBUG DUMP FAILED: {str(ex).upper()}"
+                self.ffmpeg_setup_view.detail_label.color = COLOR_RED
+                self.ffmpeg_setup_view._safe_update()
             if getattr(self, "_diagnostic_logger", None):
                 self._diagnostic_logger.log_error(f"Debug dump failed: {ex}", exc=ex)
 
