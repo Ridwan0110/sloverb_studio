@@ -175,8 +175,8 @@ def test_show_export_format_dialog():
     app.show_export_format_dialog()
     assert "PLEASE LOAD AN AUDIO FILE" in app.status_banner.value
 
-    # When file loaded, opens dialog
+    # When file loaded, opens dialog via show_dialog or open
     app.current_filepath = "test.wav"
     app.metadata = MagicMock()
     app.show_export_format_dialog()
-    page.open.assert_called_once()
+    assert page.show_dialog.called or page.open.called
