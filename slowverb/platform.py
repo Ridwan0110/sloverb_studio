@@ -60,9 +60,13 @@ def detect_platform(page: Optional[ft.Page] = None) -> PlatformType:
 
 def is_mobile_environment(page: Optional[ft.Page] = None) -> bool:
     """
-    Returns True if the application is executing on a mobile OS (Android/iOS)
+    Returns True if the application is executing on a mobile OS (Android/iOS),
+    running in mobile UI simulation mode (SLOVERB_MOBILE_UI=1),
     or running in a narrow mobile-like portrait viewport (width < 650).
     """
+    if os.environ.get("SLOVERB_MOBILE_UI") in ("1", "true", "True"):
+        return True
+
     plat = detect_platform(page)
     if plat in (PlatformType.ANDROID, PlatformType.IOS):
         return True
