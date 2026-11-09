@@ -520,6 +520,26 @@ def test_no_unsupported_controls_in_overlay():
     app.close()
 
 
+def test_no_unsupported_controls_in_overlay_on_mobile():
+    """Verify that on mobile, services like FilePicker and Audio are never added to page.overlay."""
+    from tests.test_entry_point import MockPage
+    import flet as ft
+    mock_page = MockPage()
+    mock_page.platform = ft.PagePlatform.ANDROID
+
+    app = SlowVerbApp(mock_page, force_mobile_ui=True)
+
+    # Services MUST NOT be in page.overlay (which causes Flutter Unknown control crash)
+    overlay_types = [type(c).__name__ for c in mock_page.overlay]
+    assert "FilePicker" not in overlay_types
+    assert "Audio" not in overlay_types
+
+    # Instead, FilePicker must be registered in page.services
+    service_types = [type(s).__name__ for s in mock_page.services]
+    assert "FilePicker" in service_types
+    app.close()
+
+
 def test_gui_browse_and_save_as_dialogs(app, sample_sine_audio, tmp_path):
     """Verify browse and save as dialog triggers update file and export correctly."""
     from unittest.mock import patch

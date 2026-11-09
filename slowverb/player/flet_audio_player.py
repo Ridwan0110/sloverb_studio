@@ -50,8 +50,20 @@ class FletAudioPlayer(BaseAudioPlayer):
                 on_state_change=self._on_state_change,
                 on_duration_change=self._on_duration_change,
             )
-            if self.page is not None and hasattr(self.page, "overlay"):
-                self.page.overlay.append(self._audio)
+            if self.page is not None:
+                # In Flet 1.0, Audio is a Service and must be added to page.services, NEVER page.overlay
+                if hasattr(self.page, "services") and isinstance(self.page.services, list):
+                    if self._audio not in self.page.services:
+                        self.page.services.append(self._audio)
+                elif hasattr(self.page, "_services") and hasattr(self.page._services, "register_service"):
+                    try:
+                        self.page._services.register_service(self._audio)
+                    except Exception:
+                        pass
+                # Guard against any legacy addition to page.overlay
+                if hasattr(self.page, "overlay") and isinstance(self.page.overlay, list):
+                    if self._audio in self.page.overlay:
+                        self.page.overlay.remove(self._audio)
                 try:
                     self.page.update()
                 except Exception:
@@ -84,15 +96,26 @@ class FletAudioPlayer(BaseAudioPlayer):
             pass
 
     def attach_page(self, page: ft.Page):
-        """Attaches the audio player to a Flet page overlay."""
+        """Attaches the audio player to a Flet page services."""
         self.page = page
-        if self._audio is not None and hasattr(self.page, "overlay"):
-            if self._audio not in self.page.overlay:
-                self.page.overlay.append(self._audio)
+        if self._audio is not None and self.page is not None:
+            # In Flet 1.0, Audio is a Service and belongs in page.services, NEVER page.overlay
+            if hasattr(self.page, "services") and isinstance(self.page.services, list):
+                if self._audio not in self.page.services:
+                    self.page.services.append(self._audio)
+            elif hasattr(self.page, "_services") and hasattr(self.page._services, "register_service"):
                 try:
-                    self.page.update()
+                    self.page._services.register_service(self._audio)
                 except Exception:
                     pass
+            # Guard against any legacy addition to page.overlay
+            if hasattr(self.page, "overlay") and isinstance(self.page.overlay, list):
+                if self._audio in self.page.overlay:
+                    self.page.overlay.remove(self._audio)
+            try:
+                self.page.update()
+            except Exception:
+                pass
 
     def _write_temp_wav(self, data: np.ndarray, sample_rate: int) -> str:
         """Writes numpy float32 buffer to a temporary 16-bit PCM WAV file."""
@@ -255,11 +278,17 @@ class FletAudioPlayer(BaseAudioPlayer):
         self.stop()
         if self._audio is not None:
             self._dispatch_async(self._audio.release)
-            if self.page is not None and hasattr(self.page, "overlay"):
-                try:
-                    self.page.overlay.remove(self._audio)
-                except Exception:
-                    pass
+            if self.page is not None:
+                if hasattr(self.page, "services") and isinstance(self.page.services, list):
+                    try:
+                        self.page.services.remove(self._audio)
+                    except Exception:
+                        pass
+                if hasattr(self.page, "overlay") and isinstance(self.page.overlay, list):
+                    try:
+                        self.page.overlay.remove(self._audio)
+                    except Exception:
+                        pass
             self._audio = None
 
         if self._temp_wav_path and os.path.isfile(self._temp_wav_path):

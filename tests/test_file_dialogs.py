@@ -19,26 +19,32 @@ def test_file_service_init_desktop():
     page = MagicMock()
     page.platform = ft.PagePlatform.WINDOWS
     page.overlay = []
+    page.services = []
 
     service = FileService(page=page)
     assert service.page == page
     assert len(page.overlay) == 0
+    assert len(page.services) == 0
 
 
 def test_file_service_init_mobile():
     page = MagicMock()
     page.platform = ft.PagePlatform.ANDROID
     page.overlay = []
+    page.services = []
 
     service = FileService(page=page)
     assert service.page == page
-    assert len(page.overlay) == 1
+    assert len(page.overlay) == 0
+    assert len(page.services) == 1
+    assert service._file_picker in page.services
 
 
 def test_file_service_pick_mobile():
     page = MagicMock()
     page.platform = ft.PagePlatform.ANDROID
     page.overlay = []
+    page.services = []
 
     picked_files = []
     service = FileService(page=page, on_file_picked=lambda p: picked_files.append(p))
@@ -64,6 +70,7 @@ def test_file_service_save_mobile():
     page = MagicMock()
     page.platform = ft.PagePlatform.ANDROID
     page.overlay = []
+    page.services = []
 
     saved_files = []
     service = FileService(page=page, on_save_completed=lambda p: saved_files.append(p))
@@ -78,6 +85,8 @@ def test_file_service_save_mobile():
     with patch.object(service._file_picker, "save_file", new_callable=MagicMock) as mock_save:
         service.save_exported_file(temp_export, "my_track_edited.opus")
         mock_save.assert_called_once()
+        _, kwargs = mock_save.call_args
+        assert kwargs.get("src_bytes") == b"mock opus data"
 
     # Simulate picker result with destination path
     event = MagicMock()
