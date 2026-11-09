@@ -134,6 +134,52 @@ def test_build_mobile_apk_arguments_and_dry_run():
     assert ret == 0
 
 
+def test_build_timer_lifecycle_and_formatting():
+    """Verify BuildTimer lifecycle, background thread execution, and minute/second formatting."""
+    import time
+    import build_mobile_apk
+
+    timer = build_mobile_apk.BuildTimer(heartbeat_interval=0.05)
+    timer.start()
+
+    assert timer._thread is not None
+    assert timer._thread.is_alive()
+    assert timer._thread.daemon is True
+
+    time.sleep(0.12)
+    assert timer.elapsed_seconds > 0.05
+
+    formatted = timer.stop()
+    assert isinstance(formatted, str)
+    assert "m " in formatted and formatted.endswith("s")
+    assert not timer._thread.is_alive()
+
+    # Verify deterministic formatting calculations
+    timer.start_time = 1000.0
+    timer.end_time = 1075.0
+    assert timer.format_elapsed() == "1m 15s"
+
+    timer.end_time = 1624.0
+    assert timer.format_elapsed() == "10m 24s"
+
+    timer.end_time = 1000.0
+    assert timer.format_elapsed() == "0m 00s"
+
+
+def test_build_mobile_apk_run_build_timer_integration(capsys):
+    """Verify run_build starts timer and prints total build time on completion."""
+    import build_mobile_apk
+
+    args = build_mobile_apk.parse_arguments([])
+    with patch("subprocess.run", return_value=subprocess.CompletedProcess(args=[], returncode=0)):
+        ret = build_mobile_apk.run_build(args)
+        assert ret == 0
+
+    captured = capsys.readouterr()
+    assert "Total Build Time:" in captured.out
+    assert "m " in captured.out
+
+
 def test_builder_cross_compile_refusal():
     """Verify builder refuses to cross-compile across OS boundaries and reports error."""
     host_os, _ = build_binary.detect_platform()
