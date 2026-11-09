@@ -11,6 +11,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from typing import Optional
 
 # Ensure redu-dev directory is in sys.path to import shared build helpers
@@ -22,6 +24,55 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from build_binary import bake_debug_mode
+
+
+class BuildTimer:
+    """
+    Background build timer that tracks elapsed duration and logs periodic heartbeats.
+    Runs in a daemon thread alongside the build and formats total time in minutes and seconds.
+    """
+
+    def __init__(self, heartbeat_interval: float = 30.0):
+        self.heartbeat_interval = heartbeat_interval
+        self.start_time: float = 0.0
+        self.end_time: float = 0.0
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self):
+        """Starts the timer and background heartbeat thread."""
+        self.start_time = time.time()
+        self.end_time = 0.0
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_heartbeat, daemon=True)
+        self._thread.start()
+        return self
+
+    def _run_heartbeat(self):
+        """Periodically prints elapsed time while the build is running."""
+        while not self._stop_event.wait(self.heartbeat_interval):
+            elapsed = time.time() - self.start_time
+            mins, secs = divmod(int(elapsed), 60)
+            print(f">> [BUILD IN PROGRESS] Elapsed: {mins}m {secs:02d}s...")
+
+    def stop(self) -> str:
+        """Stops the timer and background thread, returning formatted elapsed duration."""
+        self.end_time = time.time()
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+        return self.format_elapsed()
+
+    @property
+    def elapsed_seconds(self) -> float:
+        """Returns elapsed seconds, or total duration once stopped."""
+        end = self.end_time if self.end_time > 0.0 else time.time()
+        return max(0.0, end - self.start_time)
+
+    def format_elapsed(self) -> str:
+        """Formats elapsed duration into minutes and seconds (e.g. '10m 24s')."""
+        mins, secs = divmod(int(self.elapsed_seconds), 60)
+        return f"{mins}m {secs:02d}s"
 
 
 def find_java_17() -> Optional[str]:
@@ -139,12 +190,15 @@ def run_build(args: Optional[argparse.Namespace] = None) -> int:
 
     repo_root = _REPO_ROOT
     orig_cwd = os.getcwd()
+    timer = BuildTimer().start()
     try:
         os.chdir(str(repo_root))
         with bake_debug_mode(repo_root, enabled=getattr(args, "debug", False)):
             res = subprocess.run(cmd)
             return res.returncode
     finally:
+        total_time = timer.stop()
+        print(f"\n>> Total Build Time: {total_time}")
         os.chdir(orig_cwd)
 
 
