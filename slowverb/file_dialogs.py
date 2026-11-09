@@ -11,7 +11,7 @@ import tempfile
 from typing import Callable, List, Optional
 import flet as ft
 
-from slowverb.platform import is_mobile_environment
+from slowverb.platform import is_mobile_platform
 
 
 AUDIO_EXTENSIONS = ["opus", "mp3", "wav", "flac", "ogg", "m4a", "aac"]
@@ -41,7 +41,7 @@ class FileService:
         self._init_picker()
 
     def _init_picker(self):
-        if is_mobile_environment(self.page):
+        if is_mobile_platform(self.page):
             if self.page is not None and hasattr(self.page, "overlay"):
                 self._file_picker = ft.FilePicker(
                     on_result=self._on_picker_result,
@@ -81,7 +81,7 @@ class FileService:
 
     def pick_audio_file(self):
         """Triggers audio file picking dialog."""
-        if not is_mobile_environment(self.page):
+        if not is_mobile_platform(self.page):
             # Desktop native tkinter dialog
             from slowverb.ui import pick_file_desktop
             picked = pick_file_desktop()
@@ -105,7 +105,7 @@ class FileService:
         """
         self._pending_export_path = temp_exported_path
 
-        if not is_mobile_environment(self.page):
+        if not is_mobile_platform(self.page):
             # Desktop save dialog
             from slowverb.ui import save_file_desktop
             ext = os.path.splitext(default_filename)[1].lstrip(".")

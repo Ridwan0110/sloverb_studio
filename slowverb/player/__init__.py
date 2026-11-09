@@ -26,12 +26,13 @@ def create_audio_player(
 ) -> BaseAudioPlayer:
     """
     Factory creating the optimal AudioPlayer backend for the current platform:
-    - On Mobile (Android/iOS) or narrow viewports: FletAudioPlayer (flet-audio)
+    - On Mobile (Android/iOS): FletAudioPlayer (flet-audio)
     - On Desktop (Windows/macOS/Linux): SoundDevicePlayer (sounddevice)
     """
-    from slowverb.platform import is_mobile_environment
+    import os
+    from slowverb.platform import is_mobile_platform
 
-    if is_mobile_environment(page):
+    if is_mobile_platform(page) or os.environ.get("FORCE_FLET_AUDIO") in ("1", "true", "True"):
         try:
             return FletAudioPlayer(page=page, on_playback_finished=on_playback_finished)
         except Exception as e:
