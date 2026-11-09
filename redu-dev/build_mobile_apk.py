@@ -7,11 +7,21 @@ checks dependencies, and invokes 'flet build apk'.
 
 import argparse
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 from typing import Optional
+
+# Ensure redu-dev directory is in sys.path to import shared build helpers
+_DEV_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _DEV_DIR.parent
+if str(_DEV_DIR) not in sys.path:
+    sys.path.insert(0, str(_DEV_DIR))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from build_binary import bake_debug_mode
 
 
 def find_java_17() -> Optional[str]:
@@ -42,10 +52,37 @@ def find_android_sdk() -> Optional[str]:
     return None
 
 
-def run_build():
+def parse_arguments(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parses command-line arguments for the Android APK builder."""
+    parser = argparse.ArgumentParser(
+        description="SloVerb Studio Android APK Builder",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--debug",
+        "--debug-mode",
+        action="store_true",
+        default=False,
+        dest="debug",
+        help="Bake DEBUG_MODE=True into the APK package for diagnostics export",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print the planned packaging arguments and exit without building",
+    )
+    return parser.parse_args(argv)
+
+
+def run_build(args: Optional[argparse.Namespace] = None) -> int:
+    if args is None:
+        args = parse_arguments()
+
     print("=" * 65)
     print("  SLOVERB STUDIO — ANDROID APK BUILDER")
     print("=" * 65)
+    print(f">> Debug Mode Bake : {'ENABLED (DEBUG_MODE=True)' if getattr(args, 'debug', False) else 'DISABLED'}")
 
     java_home = find_java_17()
     if java_home:
@@ -87,9 +124,18 @@ def run_build():
         "--exclude", "docs",
     ]
     print(f">> Executing: {' '.join(cmd)}")
-    subprocess.run(cmd)
+
+    if getattr(args, "dry_run", False):
+        print("[DRY-RUN] Command arguments:")
+        print(" ".join(cmd))
+        if getattr(args, "debug", False):
+            print("[DRY-RUN] Would bake DEBUG_MODE = True into slowverb/__init__.py")
+        return 0
+
+    with bake_debug_mode(_REPO_ROOT, enabled=getattr(args, "debug", False)):
+        res = subprocess.run(cmd)
+        return res.returncode
 
 
 if __name__ == "__main__":
-    from typing import Optional
-    run_build()
+    sys.exit(run_build())
