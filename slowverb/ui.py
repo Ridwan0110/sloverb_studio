@@ -535,8 +535,14 @@ class FFmpegSetupView(ft.Container):
 class SlowVerbApp:
     """Core GUI and state controller for SlowVerb Studio."""
 
-    def __init__(self, page: Optional[ft.Page] = None, ffmpeg_path: Optional[str] = None):
+    def __init__(
+        self,
+        page: Optional[ft.Page] = None,
+        ffmpeg_path: Optional[str] = None,
+        force_mobile_ui: bool = False,
+    ):
         self.page = page
+        self.force_mobile_ui = force_mobile_ui or (os.environ.get("SLOVERB_MOBILE_UI") in ("1", "true", "True"))
         self.ffmpeg_path: Optional[str] = ffmpeg_path or find_ffmpeg()
         self.engine: Optional[AudioEngine] = None
         self.player: Optional[AudioPlayer] = None
@@ -655,7 +661,7 @@ class SlowVerbApp:
     def _adapt_waveform_bars(self, width: float):
         """Adaptively recalculates waveform bar count for mobile viewports."""
         from slowverb.platform import is_mobile_environment
-        if not is_mobile_environment(self.page):
+        if not (getattr(self, "force_mobile_ui", False) or is_mobile_environment(self.page)):
             target_bars = 90
         else:
             usable = max(240.0, width - 40.0)
@@ -711,7 +717,7 @@ class SlowVerbApp:
             return
 
         from slowverb.platform import is_mobile_environment
-        is_mobile = is_mobile_environment(self.page)
+        is_mobile = getattr(self, "force_mobile_ui", False) or is_mobile_environment(self.page)
 
         self.page.title = APP_NAME
         self.page.bgcolor = COLOR_BG
@@ -728,17 +734,28 @@ class SlowVerbApp:
             FONT_AWESOME_FONT: "fonts/fa-solid-900.ttf",
         }
 
-        if hasattr(self.page, "window") and self.page.window and not is_mobile:
-            try:
-                self.page.window.width = 1120
-                self.page.window.height = 900
-                self.page.window.min_width = 880
-                self.page.window.min_height = 750
-                w = float(self.page.window.width)
-                if w > 0:
-                    self.waveform_container_width = max(self.total_bars_width, w - 56.0)
-            except Exception:
-                pass
+        if hasattr(self.page, "window") and self.page.window:
+            if getattr(self, "force_mobile_ui", False):
+                try:
+                    self.page.window.width = 412
+                    self.page.window.height = 840
+                    self.page.window.min_width = 360
+                    self.page.window.min_height = 600
+                    self.waveform_container_width = 360.0
+                    self._adapt_waveform_bars(360.0)
+                except Exception:
+                    pass
+            elif not is_mobile:
+                try:
+                    self.page.window.width = 1120
+                    self.page.window.height = 900
+                    self.page.window.min_width = 880
+                    self.page.window.min_height = 750
+                    w = float(self.page.window.width)
+                    if w > 0:
+                        self.waveform_container_width = max(self.total_bars_width, w - 56.0)
+                except Exception:
+                    pass
 
         if hasattr(self.page, "on_resize"):
             self.page.on_resize = self._on_page_resize
@@ -1286,7 +1303,7 @@ class SlowVerbApp:
     def build_ui(self) -> ft.Control:
         """Assembles the full application UI layout based on active platform and viewport."""
         from slowverb.platform import is_mobile_environment
-        if is_mobile_environment(self.page):
+        if getattr(self, "force_mobile_ui", False) or is_mobile_environment(self.page):
             return self.build_mobile_ui()
         return self.build_desktop_ui()
 
@@ -2722,7 +2739,7 @@ class SlowVerbApp:
             return None
 
         from slowverb.platform import is_mobile_environment
-        is_mobile = is_mobile_environment(self.page)
+        is_mobile = getattr(self, "force_mobile_ui", False) or is_mobile_environment(self.page)
 
         # Determine target output path
         ext = (export_format or self.export_format).lower()

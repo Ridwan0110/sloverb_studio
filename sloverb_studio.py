@@ -1,36 +1,83 @@
 """Main entry point for SlowVerb Studio desktop application."""
 
+import argparse
 import os
 import sys
+from typing import Optional
 import flet as ft
 
 from slowverb import __version__
 from slowverb.ui import SlowVerbApp
 
 
-def parse_cli_args(argv: list[str]) -> bool:
-    """
-    Handles early CLI flags like --version, --help, --check.
-    Returns True if a command-line flag was handled and the application should exit.
-    """
-    if len(argv) > 1:
-        first_arg = argv[1].strip()
-        if first_arg in ("--version", "-V", "-v", "version"):
-            print(f"SloVerb Studio v{__version__}")
-            return True
-        return False
-    return False
+def create_argument_parser() -> argparse.ArgumentParser:
+    """Creates the command-line argument parser for SlowVerb Studio."""
+    parser = argparse.ArgumentParser(
+        prog="sloverb_studio",
+        description="SloVerb Studio - Cyber/robotic audio editor for slowed & reverb, nightcore, and bass boosting.",
+    )
+    parser.add_argument(
+        "file",
+        nargs="?",
+        default=None,
+        help="Optional path to an audio file to load on startup.",
+    )
+    parser.add_argument(
+        "--mobile-ui",
+        action="store_true",
+        help="Simulate mobile UI layout on desktop.",
+    )
+    parser.add_argument(
+        "-v",
+        "-V",
+        "--version",
+        action="version",
+        version=f"SloVerb Studio v{__version__}",
+        help="Show program's version number and exit.",
+    )
+    return parser
 
 
-def main(page: ft.Page):
+def parse_cli_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """
+    Parses command-line arguments using argparse.
+    Handles --version, --help, --mobile-ui, and optional audio file path.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+    elif argv:
+        base_0 = os.path.basename(argv[0]).lower()
+        if base_0 in ("sloverb_studio.py", "sloverbstudio.exe", "sloverbstudio") or base_0.endswith(".py"):
+            argv = argv[1:]
+
+    # Support 'version' subcommand/alias without hyphen
+    if len(argv) == 1 and argv[0] == "version":
+        argv = ["--version"]
+
+    parser = create_argument_parser()
+    args, _ = parser.parse_known_args(argv)
+
+    if getattr(args, "mobile_ui", False):
+        os.environ["SLOVERB_MOBILE_UI"] = "1"
+
+    return args
+
+
+def main(page: ft.Page, cli_args: Optional[argparse.Namespace] = None):
     """Flet application bootstrap."""
-    app = SlowVerbApp(page)
+    if cli_args is None:
+        base_cmd = os.path.basename(sys.argv[0]).lower() if sys.argv else ""
+        if "pytest" in sys.modules and base_cmd not in ("sloverb_studio.py", "sloverbstudio.exe", "sloverbstudio"):
+            cli_args = argparse.Namespace(file=None, mobile_ui=False)
+        else:
+            cli_args = parse_cli_args()
+
+    force_mobile = bool(getattr(cli_args, "mobile_ui", False)) or (os.environ.get("SLOVERB_MOBILE_UI") in ("1", "true", "True"))
+    app = SlowVerbApp(page, force_mobile_ui=force_mobile)
 
     # If an audio file was passed via command line argument, load it directly
-    if len(sys.argv) > 1:
-        cli_file = sys.argv[1]
-        if os.path.isfile(cli_file):
-            app.load_file(cli_file)
+    if getattr(cli_args, "file", None) and os.path.isfile(cli_args.file):
+        app.load_file(cli_args.file)
 
     return app
 
@@ -52,6 +99,5 @@ def start_app():
 
 
 if __name__ == "__main__":
-    if parse_cli_args(sys.argv):
-        sys.exit(0)
+    parse_cli_args()
     start_app()

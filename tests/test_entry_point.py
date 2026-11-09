@@ -84,3 +84,55 @@ def test_start_app_fallback_to_flet_app():
     with patch.object(sloverb_studio, "ft", fake_flet):
         sloverb_studio.start_app()
         fake_flet.app.assert_called_once_with(target=sloverb_studio.main)
+
+
+def test_create_argument_parser():
+    """Verify create_argument_parser configures file, --mobile-ui, and --version options."""
+    parser = sloverb_studio.create_argument_parser()
+    args = parser.parse_args(["song.mp3", "--mobile-ui"])
+    assert args.file == "song.mp3"
+    assert args.mobile_ui is True
+
+
+def test_parse_cli_args_mobile_ui():
+    """Verify parse_cli_args handles --mobile-ui and sets SLOVERB_MOBILE_UI env var."""
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("SLOVERB_MOBILE_UI", None)
+        args = sloverb_studio.parse_cli_args(["sloverb_studio.py", "--mobile-ui"])
+        assert args.mobile_ui is True
+        assert os.environ.get("SLOVERB_MOBILE_UI") == "1"
+
+
+def test_parse_cli_args_file_and_mobile_ui(sample_sine_audio):
+    """Verify parse_cli_args handles positional file along with --mobile-ui."""
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("SLOVERB_MOBILE_UI", None)
+        args = sloverb_studio.parse_cli_args(["sloverb_studio.py", sample_sine_audio, "--mobile-ui"])
+        assert args.file == sample_sine_audio
+        assert args.mobile_ui is True
+
+
+def test_parse_cli_args_version(capsys):
+    """Verify parse_cli_args displays version and exits cleanly on --version."""
+    with pytest.raises(SystemExit) as exc_info:
+        sloverb_studio.parse_cli_args(["sloverb_studio.py", "--version"])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert f"SloVerb Studio v{sloverb_studio.__version__}" in captured.out
+
+
+def test_main_mobile_ui_flag():
+    """Verify main(page) with --mobile-ui configures mobile viewport dimensions and mobile UI."""
+    mock_page = MockPage()
+    test_args = ["sloverb_studio.py", "--mobile-ui"]
+
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("SLOVERB_MOBILE_UI", None)
+        with patch.object(sys, "argv", test_args):
+            app = sloverb_studio.main(mock_page)
+            assert app.force_mobile_ui is True
+            assert mock_page.window.width == 412
+            assert mock_page.window.height == 840
+            assert mock_page.window.min_width == 360
+            assert mock_page.window.min_height == 600
+            app.close()
