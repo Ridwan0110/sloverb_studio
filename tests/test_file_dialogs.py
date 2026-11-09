@@ -105,3 +105,82 @@ def test_file_service_save_mobile():
     # Clean up
     if os.path.isfile(target_export):
         os.remove(target_export)
+
+def test_file_service_pick_async_resolution():
+    """Verify that awaiting pick_files returns FilePickerFile list and calls on_file_picked directly."""
+    import asyncio
+    page = MagicMock()
+    page.platform = ft.PagePlatform.ANDROID
+    page.overlay = []
+    page.services = []
+
+    # Mock run_task so it actually executes the coroutine
+    def fake_run_task(coro_fn, *args):
+        coro = coro_fn(*args)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    page.run_task.side_effect = fake_run_task
+
+    picked_files = []
+    service = FileService(page=page, on_file_picked=lambda p: picked_files.append(p))
+
+    fake_file = MagicMock()
+    fake_file.path = "/data/user/0/com.redu.sloverb/cache/picked_track.opus"
+    fake_file.bytes = None
+
+    async def fake_pick_files(**kwargs):
+        return [fake_file]
+
+    with patch.object(service._file_picker, "pick_files", side_effect=fake_pick_files):
+        service.pick_audio_file()
+
+    assert len(picked_files) == 1
+    assert picked_files[0] == "/data/user/0/com.redu.sloverb/cache/picked_track.opus"
+
+
+def test_file_service_save_async_resolution():
+    """Verify that awaiting save_file returns target path string and completes save directly."""
+    import asyncio
+    page = MagicMock()
+    page.platform = ft.PagePlatform.ANDROID
+    page.overlay = []
+    page.services = []
+
+    def fake_run_task(coro_fn, *args):
+        coro = coro_fn(*args)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    page.run_task.side_effect = fake_run_task
+
+    saved_files = []
+    service = FileService(page=page, on_save_completed=lambda p: saved_files.append(p))
+
+    with tempfile.NamedTemporaryFile(suffix=".opus", delete=False) as tf:
+        tf.write(b"async export test bytes")
+        temp_export = tf.name
+
+    target_export = temp_export + ".saved.opus"
+
+    async def fake_save_file(**kwargs):
+        return target_export
+
+    with patch.object(service._file_picker, "save_file", side_effect=fake_save_file):
+        service.save_exported_file(temp_export, "my_track.opus")
+
+    assert len(saved_files) == 1
+    assert saved_files[0] == target_export
+    assert os.path.isfile(target_export)
+    with open(target_export, "rb") as f:
+        assert f.read() == b"async export test bytes"
+
+    if os.path.isfile(target_export):
+        os.remove(target_export)
+
