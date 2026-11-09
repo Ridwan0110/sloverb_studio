@@ -87,8 +87,51 @@ def test_builder_argument_parsing():
         assert args.console is True
         assert args.clean is True
         assert args.verify is False
+        assert args.debug is False
         assert args.target_os == "linux"
         assert args.target_arch == "arm64"
+
+    with patch("sys.argv", ["build_binary.py", "--debug"]):
+        args_dbg = build_binary.parse_arguments()
+        assert args_dbg.debug is True
+
+
+def test_bake_debug_mode_context_manager(tmp_path):
+    """Verify bake_debug_mode temporarily sets DEBUG_MODE=True and restores original file."""
+    slowverb_dir = tmp_path / "slowverb"
+    slowverb_dir.mkdir(parents=True)
+    init_py = slowverb_dir / "__init__.py"
+    original_text = '"""Package init."""\n\n__version__ = "0.4.0"\nDEBUG_MODE: bool = False\n\nAPP_NAME = "Test"\n'
+    init_py.write_text(original_text, encoding="utf-8")
+
+    # Disabled mode should not modify file
+    with build_binary.bake_debug_mode(tmp_path, enabled=False):
+        assert init_py.read_text(encoding="utf-8") == original_text
+
+    # Enabled mode should patch during block and restore after
+    with build_binary.bake_debug_mode(tmp_path, enabled=True):
+        patched = init_py.read_text(encoding="utf-8")
+        assert "DEBUG_MODE: bool = True" in patched
+        assert "DEBUG_MODE: bool = False" not in patched
+
+    # After exit, original content must be restored
+    assert init_py.read_text(encoding="utf-8") == original_text
+
+
+def test_build_mobile_apk_arguments_and_dry_run():
+    """Verify build_mobile_apk argument parsing and dry-run execution."""
+    import build_mobile_apk
+
+    args_default = build_mobile_apk.parse_arguments([])
+    assert args_default.debug is False
+    assert args_default.dry_run is False
+
+    args_debug = build_mobile_apk.parse_arguments(["--debug", "--dry-run"])
+    assert args_debug.debug is True
+    assert args_debug.dry_run is True
+
+    ret = build_mobile_apk.run_build(args_debug)
+    assert ret == 0
 
 
 def test_builder_cross_compile_refusal():

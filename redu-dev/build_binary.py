@@ -14,6 +14,7 @@ Examples:
 """
 
 import argparse
+from contextlib import contextmanager
 import os
 import platform
 import re
@@ -291,6 +292,14 @@ def parse_arguments() -> argparse.Namespace:
         help="Explicit version override (defaults to slowverb.__version__ or package metadata)",
     )
     parser.add_argument(
+        "--debug",
+        "--debug-mode",
+        action="store_true",
+        default=False,
+        dest="debug",
+        help="Bake DEBUG_MODE=True into the packaged application for diagnostics export",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
@@ -337,6 +346,43 @@ def create_distribution_archive(
     return output_archive
 
 
+@contextmanager
+def bake_debug_mode(repo_root: Path, enabled: bool = False):
+    """
+    Context manager that temporarily sets DEBUG_MODE = True in slowverb/__init__.py
+    during the build process, and restores the original file content upon exit.
+    """
+    if not enabled:
+        yield
+        return
+
+    init_file = repo_root / "slowverb" / "__init__.py"
+    if not init_file.is_file():
+        yield
+        return
+
+    original_content = init_file.read_text(encoding="utf-8")
+    patched_content = re.sub(
+        r"DEBUG_MODE\s*:\s*bool\s*=\s*(?:False|True)",
+        "DEBUG_MODE: bool = True",
+        original_content,
+    )
+    if patched_content == original_content:
+        patched_content = re.sub(
+            r"DEBUG_MODE\s*=\s*(?:False|True)",
+            "DEBUG_MODE = True",
+            original_content,
+        )
+
+    print(f"\n>> [DEBUG MODE] Baking DEBUG_MODE = True into {init_file.name}")
+    init_file.write_text(patched_content, encoding="utf-8")
+    try:
+        yield
+    finally:
+        print(f"\n>> [DEBUG MODE] Restoring original {init_file.name}")
+        init_file.write_text(original_content, encoding="utf-8")
+
+
 def run_build(args: argparse.Namespace) -> int:
     """Executes the universal packaging workflow for the active platform."""
     start_time = time.time()
@@ -353,6 +399,7 @@ def run_build(args: argparse.Namespace) -> int:
     print(f"Target Platform : {target_os} ({target_arch})")
     print(f"Python Runtime  : {platform.python_version()} ({platform.architecture()[0]})")
     print(f"Output Target   : {args.name} in '{args.distpath}'")
+    print(f"Debug Mode Bake : {'ENABLED (DEBUG_MODE=True)' if getattr(args, 'debug', False) else 'DISABLED'}")
     print("-" * 70)
 
     # 1. Host vs Target compatibility verification
@@ -460,6 +507,8 @@ def run_build(args: argparse.Namespace) -> int:
     if args.dry_run:
         print("[DRY-RUN] Command arguments:")
         print(" ".join(flet_args))
+        if getattr(args, "debug", False):
+            print("[DRY-RUN] Would bake DEBUG_MODE = True into slowverb/__init__.py")
         return 0
 
     # Execute build via flet_cli
@@ -470,20 +519,21 @@ def run_build(args: argparse.Namespace) -> int:
 
     orig_argv = sys.argv
     orig_cwd = os.getcwd()
-    try:
-        os.chdir(str(repo_root))
-        sys.argv = flet_args
-        flet.cli.main()
-    except SystemExit as se:
-        if se.code not in (0, None):
-            print(f"\nERROR: Build failed with exit code {se.code}")
-            return int(se.code)
-    except Exception as e:
-        print(f"\nERROR: Build encountered an exception: {e}")
-        return 1
-    finally:
-        sys.argv = orig_argv
-        os.chdir(orig_cwd)
+    with bake_debug_mode(repo_root, enabled=getattr(args, "debug", False)):
+        try:
+            os.chdir(str(repo_root))
+            sys.argv = flet_args
+            flet.cli.main()
+        except SystemExit as se:
+            if se.code not in (0, None):
+                print(f"\nERROR: Build failed with exit code {se.code}")
+                return int(se.code)
+        except Exception as e:
+            print(f"\nERROR: Build encountered an exception: {e}")
+            return 1
+        finally:
+            sys.argv = orig_argv
+            os.chdir(orig_cwd)
 
     # 5. Locate generated artifact
     if target_os == "darwin":
