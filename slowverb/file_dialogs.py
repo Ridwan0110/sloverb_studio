@@ -36,31 +36,60 @@ class FileService:
             self._init_picker()
 
     def attach_page(self, page: ft.Page):
-        """Attaches to a Flet page and registers the FilePicker in the overlay."""
+        """Attaches to a Flet page and registers the FilePicker in the page services."""
         self.page = page
         self._init_picker()
 
     def _init_picker(self):
         if is_mobile_platform(self.page):
-            if self.page is not None and hasattr(self.page, "overlay"):
+            if self._file_picker is None:
                 self._file_picker = ft.FilePicker(
                     on_result=self._on_picker_result,
                 )
-                if self._file_picker not in self.page.overlay:
-                    self.page.overlay.append(self._file_picker)
+            if self.page is not None:
+                # In Flet 1.0, services belong in page.services, NEVER in page.overlay
+                if hasattr(self.page, "services") and isinstance(self.page.services, list):
+                    if self._file_picker not in self.page.services:
+                        self.page.services.append(self._file_picker)
+                elif hasattr(self.page, "_services") and hasattr(self.page._services, "register_service"):
                     try:
-                        self.page.update()
+                        self.page._services.register_service(self._file_picker)
                     except Exception:
                         pass
+                # Guard against any legacy addition to page.overlay (which causes Flutter Unknown control crashes)
+                if hasattr(self.page, "overlay") and isinstance(self.page.overlay, list):
+                    if self._file_picker in self.page.overlay:
+                        self.page.overlay.remove(self._file_picker)
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
 
     def _dispatch_async(self, fn, *args, **kwargs):
         """Dispatches an async or synchronous function safely on page event loop."""
         res = fn(*args, **kwargs)
         import inspect
         if inspect.iscoroutine(res):
+            async def _run():
+                try:
+                    val = await res
+                    if val and isinstance(val, str) and self._pending_export_path:
+                        target_path = val
+                        if os.path.isfile(self._pending_export_path) and os.path.abspath(self._pending_export_path) != os.path.abspath(target_path):
+                            try:
+                                shutil.copy2(self._pending_export_path, target_path)
+                                os.remove(self._pending_export_path)
+                            except Exception:
+                                pass
+                        self._pending_export_path = None
+                        if self.on_save_completed:
+                            self.on_save_completed(target_path)
+                except Exception as ex:
+                    print(f"Async dispatch error: {ex}")
+
             if self.page is not None and hasattr(self.page, "run_task"):
                 try:
-                    self.page.run_task(lambda: res)
+                    self.page.run_task(_run)
                     return
                 except Exception:
                     pass
@@ -68,10 +97,10 @@ class FileService:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(res, loop)
+                    asyncio.run_coroutine_threadsafe(_run(), loop)
                     return
                 else:
-                    loop.run_until_complete(res)
+                    loop.run_until_complete(_run())
                     return
             except Exception:
                 try:
@@ -128,11 +157,21 @@ class FileService:
 
         # Mobile FilePicker save
         if self._file_picker is not None:
+            # Read file bytes for mobile (required by Flet 1.0 on Android SAF)
+            src_bytes = None
+            if temp_exported_path and os.path.isfile(temp_exported_path):
+                try:
+                    with open(temp_exported_path, "rb") as f:
+                        src_bytes = f.read()
+                except Exception:
+                    pass
+
             self._dispatch_async(
                 self._file_picker.save_file,
                 dialog_title=dialog_title,
                 file_name=default_filename,
                 allowed_extensions=allowed_extensions or AUDIO_EXTENSIONS,
+                src_bytes=src_bytes,
             )
         else:
             # Fallback if no picker attached

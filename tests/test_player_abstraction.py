@@ -35,8 +35,12 @@ def test_create_audio_player_mobile():
     page = MagicMock()
     page.platform = ft.PagePlatform.ANDROID
     page.overlay = []
+    page.services = []
     player = create_audio_player(page)
     assert isinstance(player, FletAudioPlayer)
+    assert len(page.overlay) == 0
+    assert len(page.services) == 1
+    assert player._audio in page.services
     player.close()
 
 
@@ -44,6 +48,7 @@ def test_flet_audio_player_load_buffer_and_seek():
     page = MagicMock()
     page.platform = ft.PagePlatform.ANDROID
     page.overlay = []
+    page.services = []
 
     player = FletAudioPlayer(page=page)
     sr = 44100
@@ -93,6 +98,7 @@ def test_flet_audio_player_callbacks():
     page = MagicMock()
     page.platform = ft.PagePlatform.ANDROID
     page.overlay = []
+    page.services = []
 
     player = FletAudioPlayer(page=page, on_playback_finished=on_finished)
     sr = 44100

@@ -25,6 +25,7 @@ class MockPage:
         self.window = MockWindow()
         self.controls = []
         self.overlay = []
+        self.services = []
 
     def add(self, *controls):
         self.controls.extend(controls)

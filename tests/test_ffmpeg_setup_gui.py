@@ -33,6 +33,7 @@ class MockPage:
         self.window = MockWindow()
         self.controls = []
         self.overlay = []
+        self.services = []
         self.fonts = {}
 
     def add(self, *controls):
