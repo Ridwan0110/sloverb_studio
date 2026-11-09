@@ -180,6 +180,7 @@ def run_build(args: Optional[argparse.Namespace] = None) -> int:
         "--org", "com.redu.sloverb",
         "--product", "SloVerb Studio",
         "--module-name", "sloverb_studio.py",
+        "--android-legacy-packaging",
         "--exclude", "ffmpeg",
         "--exclude", "dist",
         "--exclude", "tests",
