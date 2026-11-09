@@ -2,7 +2,8 @@
 Android FFmpeg provider for SloVerb Studio.
 
 Locates bundled native libraries (e.g., libffmpeg.so) within the Android APK
-native library path (jniLibs/<abi>/) or app-private storage.
+native library path (jniLibs/<abi>/) or app-private storage, or falls back
+to PyAV (av / flet-libffmpeg) pre-compiled mobile binary wheels.
 """
 
 import glob
@@ -15,7 +16,7 @@ from slowverb.platform import get_android_abi
 
 
 class AndroidFFmpegProvider(BaseFFmpegProvider):
-    """FFmpeg provider resolving native libffmpeg.so on Android systems."""
+    """FFmpeg provider resolving native libffmpeg.so or PyAV on Android systems."""
 
     def __init__(self, package_name: str = "com.redu.sloverb", custom_lib_dir: Optional[str] = None):
         self.package_name = package_name
@@ -63,10 +64,18 @@ class AndroidFFmpegProvider(BaseFFmpegProvider):
                 # Verify executable bit or readability
                 if os.access(candidate, os.X_OK) or os.access(candidate, os.R_OK):
                     return os.path.abspath(candidate)
+        # Fallback to PyAV (flet-libffmpeg / av native mobile wheels)
+        try:
+            import av  # noqa: F401
+            return "pyav"
+        except ImportError:
+            pass
         return None
 
     def is_available(self) -> bool:
         path = self.get_binary_path()
+        if path == "pyav":
+            return True
         return path is not None and os.path.isfile(path)
 
     def get_platform_name(self) -> str:
