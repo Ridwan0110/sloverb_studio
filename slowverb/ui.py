@@ -800,7 +800,7 @@ class SlowVerbApp:
         self.page.bgcolor = COLOR_BG
 
         if is_mobile:
-            self.page.padding = ft.Padding.only(top=10, left=12, right=12, bottom=12)
+            self.page.padding = ft.Padding.only(top=42, left=12, right=12, bottom=12)
             self.page.scroll = ft.ScrollMode.ADAPTIVE
         else:
             self.page.padding = 16
@@ -942,6 +942,14 @@ class SlowVerbApp:
             font_family=ROBOTIC_FONT,
             size=11,
             color=COLOR_CYAN,
+        )
+
+        from slowverb import DEBUG_MODE
+        self.debug_tag_text = ft.Text(
+            f"DEBUG: {DEBUG_MODE}",
+            font_family=ROBOTIC_FONT,
+            size=11,
+            color=COLOR_TEXT_DIM,
         )
 
         self.version_badge_text = ft.Text(
@@ -1402,6 +1410,7 @@ class SlowVerbApp:
             ),
             ft.Row([
                 self.format_badge_text,
+                self.debug_tag_text,
                 self.version_badge_text,
                 ft.Container(width=30 if self.debug_mode else 0),
             ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -1578,6 +1587,7 @@ class SlowVerbApp:
             ),
             ft.Row([
                 self.format_badge_text,
+                self.debug_tag_text,
                 self.version_badge_text,
                 ft.Container(width=28 if self.debug_mode else 0),
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -1850,12 +1860,17 @@ class SlowVerbApp:
 
         if not filepath or not os.path.isfile(filepath):
             self.set_status(f"ERROR: FILE NOT FOUND '{filepath}'", is_error=True)
+            self.update_ui()
             return
 
         try:
             self.player.stop()
             self.current_filepath = os.path.abspath(filepath)
             self.file_path_field.value = self.current_filepath
+
+            # Immediate visual status feedback
+            self.set_status(f"LOADING '{os.path.basename(self.current_filepath)}'...")
+            self.update_ui()
 
             # Probe technical details
             self.metadata = self.engine.probe_file(self.current_filepath)
@@ -1875,7 +1890,18 @@ class SlowVerbApp:
 
             # Extract waveform for visualization and peeking
             self.set_status("ANALYZING WAVEFORM PEAKS...")
+            self.update_ui()
             self.waveform = self.engine.extract_waveform(self.current_filepath, num_bins=self.num_wave_bars)
+            if self.metadata.duration <= 0.0 and self.waveform.duration > 0.0:
+                self.metadata.duration = round(self.waveform.duration, 2)
+                self.effects.trim_end = self.metadata.duration
+                self.trim_end_field.value = f"{self.metadata.duration:.1f}"
+                self.track_info_text.value = (
+                    f"TRACK: {self.metadata.title.upper()} // "
+                    f"LENGTH: {self.metadata.formatted_duration} // "
+                    f"SR: {self.metadata.sample_rate}Hz // "
+                    f"CH: {self.metadata.channels}"
+                )
             self._update_waveform_bars(playhead_ratio=0.0)
 
             # Pre-load raw original audio into player
