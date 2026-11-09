@@ -2663,6 +2663,54 @@ class SlowVerbApp:
 
         threading.Thread(target=background_render, daemon=True).start()
 
+    def _open_dialog(self, dlg: ft.AlertDialog):
+        """Displays an alert dialog safely across Flet versions (Flet 1.0+ show_dialog, Flet 0.23+ open, legacy)."""
+        if not self.page:
+            return
+        if hasattr(self.page, "show_dialog"):
+            try:
+                self.page.show_dialog(dlg)
+                return
+            except Exception:
+                pass
+        if hasattr(self.page, "open"):
+            try:
+                self.page.open(dlg)
+                return
+            except Exception:
+                pass
+        try:
+            self.page.dialog = dlg
+            dlg.open = True
+            self.page.update()
+        except Exception:
+            pass
+
+    def _close_dialog(self, dlg: Optional[ft.AlertDialog] = None):
+        """Dismisses the open dialog safely across Flet versions."""
+        if not self.page:
+            return
+        if hasattr(self.page, "pop_dialog"):
+            try:
+                self.page.pop_dialog()
+                return
+            except Exception:
+                pass
+        if hasattr(self.page, "close") and dlg:
+            try:
+                self.page.close(dlg)
+                return
+            except Exception:
+                pass
+        try:
+            if hasattr(self.page, "dialog") and self.page.dialog:
+                self.page.dialog.open = False
+            if dlg:
+                dlg.open = False
+            self.page.update()
+        except Exception:
+            pass
+
     def show_export_format_dialog(self):
         """Displays cyber modal dialog prompting user to select export format on mobile."""
         if not self.current_filepath or not self.metadata:
@@ -2670,32 +2718,12 @@ class SlowVerbApp:
             return
 
         def _select_and_export(fmt: str):
-            if self.page and hasattr(self.page, "close"):
-                try:
-                    self.page.close(dlg)
-                except Exception:
-                    pass
-            elif self.page and hasattr(self.page, "dialog") and self.page.dialog:
-                self.page.dialog.open = False
-                try:
-                    self.page.update()
-                except Exception:
-                    pass
+            self._close_dialog(dlg)
             self.export_format = fmt
             self.export_processed_track(export_format=fmt)
 
         def _cancel(e):
-            if self.page and hasattr(self.page, "close"):
-                try:
-                    self.page.close(dlg)
-                except Exception:
-                    pass
-            elif self.page and hasattr(self.page, "dialog") and self.page.dialog:
-                self.page.dialog.open = False
-                try:
-                    self.page.update()
-                except Exception:
-                    pass
+            self._close_dialog(dlg)
 
         dlg = ft.AlertDialog(
             title=ft.Text("EXPORT AUDIO TRACK", font_family=ROBOTIC_FONT, size=13, weight=ft.FontWeight.BOLD, color=COLOR_ACCENT),
@@ -2722,18 +2750,7 @@ class SlowVerbApp:
             shape=ft.RoundedRectangleBorder(radius=2),
         )
 
-        if self.page and hasattr(self.page, "open"):
-            try:
-                self.page.open(dlg)
-            except Exception:
-                pass
-        elif self.page:
-            self.page.dialog = dlg
-            dlg.open = True
-            try:
-                self.page.update()
-            except Exception:
-                pass
+        self._open_dialog(dlg)
 
     def export_processed_track(
         self,
