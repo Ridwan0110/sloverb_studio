@@ -125,12 +125,28 @@ class AudioEngine:
                 ffmpeg_path = resolved
             else:
                 ffmpeg_path = get_ffmpeg_path(ensure=auto_ensure)
-        self.ffmpeg_path = ffmpeg_path
-        if not os.path.isfile(self.ffmpeg_path):
-            raise FileNotFoundError(
-                f"FFmpeg binary not found at '{self.ffmpeg_path}'. "
-                f"Please ensure FFmpeg is installed system-wide or inside the 'ffmpeg' directory."
-            )
+        self.use_pyav: bool = False
+        if ffmpeg_path == "pyav":
+            try:
+                import av  # noqa: F401
+                self.use_pyav = True
+                self.ffmpeg_path = "pyav"
+            except ImportError:
+                raise FileNotFoundError("PyAV (av) is not installed.")
+        elif ffmpeg_path and os.path.isfile(ffmpeg_path):
+            self.ffmpeg_path = ffmpeg_path
+            self.use_pyav = False
+        else:
+            try:
+                import av  # noqa: F401
+                self.use_pyav = True
+                self.ffmpeg_path = "pyav"
+            except ImportError:
+                target_str = str(ffmpeg_path) if ffmpeg_path else "None"
+                raise FileNotFoundError(
+                    f"FFmpeg binary not found at '{target_str}'. "
+                    f"Please ensure FFmpeg is installed system-wide, inside the 'ffmpeg' directory, or PyAV is installed."
+                )
 
     def __del__(self):
         self.cleanup()
@@ -146,10 +162,50 @@ class AudioEngine:
                 pass
         temp_files.clear()
 
+    def _probe_file_pyav(self, filepath: str) -> AudioMetadata:
+        import av
+        try:
+            container = av.open(filepath)
+        except Exception as e:
+            raise RuntimeError(f"Failed to read audio file '{filepath}': {e}")
+
+        with container:
+            if not container.streams.audio:
+                raise RuntimeError(f"No audio streams found in '{filepath}'.")
+            stream = container.streams.audio[0]
+            duration = 0.0
+            if stream.duration is not None and stream.time_base is not None:
+                duration = float(stream.duration * stream.time_base)
+            if duration <= 0.0 and container.duration is not None:
+                duration = float(container.duration / av.time_base)
+
+            sr = stream.rate or 44100
+            channels = getattr(stream, "channels", 2) or 2
+            bitrate = stream.bit_rate or 0
+            fmt_name = os.path.splitext(filepath)[1].lstrip(".").lower()
+            metadata = container.metadata or {}
+            title = metadata.get("title") or os.path.splitext(os.path.basename(filepath))[0]
+            artist = metadata.get("artist") or ""
+
+        return AudioMetadata(
+            filepath=os.path.abspath(filepath),
+            filename=os.path.basename(filepath),
+            duration=round(duration, 2),
+            sample_rate=sr,
+            channels=channels,
+            bitrate=bitrate,
+            format_name=fmt_name,
+            title=title,
+            artist=artist,
+        )
+
     def probe_file(self, filepath: str) -> AudioMetadata:
         """Extracts technical metadata from an audio file."""
         if not os.path.isfile(filepath):
             raise FileNotFoundError(f"Input file not found: {filepath}")
+
+        if getattr(self, "use_pyav", False):
+            return self._probe_file_pyav(filepath)
 
         cmd = [self.ffmpeg_path, "-hide_banner", "-i", filepath, "-f", "null", "-"]
         proc = subprocess.run(
@@ -216,6 +272,36 @@ class AudioEngine:
             artist=artist,
         )
 
+    def _extract_waveform_pyav(self, filepath: str, num_bins: int = 100) -> WaveformData:
+        import av
+        try:
+            container = av.open(filepath)
+        except Exception as e:
+            raise RuntimeError(f"Failed to read audio file '{filepath}': {e}")
+
+        with container:
+            if not container.streams.audio:
+                raise RuntimeError(f"No audio stream found in '{filepath}'.")
+            stream = container.streams.audio[0]
+            duration = 0.0
+            if stream.duration is not None and stream.time_base is not None:
+                duration = float(stream.duration * stream.time_base)
+            if duration <= 0.0 and container.duration is not None:
+                duration = float(container.duration / av.time_base)
+
+            resampler = av.AudioResampler(format="s16", layout="mono", rate=8000)
+            chunks = []
+            for frame in container.decode(stream):
+                resampled = resampler.resample(frame)
+                for r in resampled:
+                    chunks.append(r.to_ndarray().flatten())
+
+            if not chunks:
+                return WaveformData(peaks=[0.0] * num_bins, duration=duration)
+
+            samples = np.concatenate(chunks).astype(np.float32) / 32768.0
+            return self.extract_waveform_from_samples(samples, sample_rate=8000, num_bins=num_bins)
+
     def extract_waveform(self, filepath: str, num_bins: int = 100) -> WaveformData:
         """
         Downsamples the audio track to 8kHz mono and extracts peak amplitudes
@@ -223,6 +309,9 @@ class AudioEngine:
         """
         if not os.path.isfile(filepath):
             raise FileNotFoundError(f"Input file not found: {filepath}")
+
+        if getattr(self, "use_pyav", False):
+            return self._extract_waveform_pyav(filepath, num_bins=num_bins)
 
         meta = self.probe_file(filepath)
         if meta.duration <= 0.0:
@@ -421,6 +510,15 @@ class AudioEngine:
         Checks if a specific filter is supported by the current FFmpeg installation.
         Returns True/False if determinable, or None if FFmpeg could not be queried.
         """
+        if getattr(self, "use_pyav", False):
+            try:
+                import av.filter
+                if hasattr(av.filter, "filters_available"):
+                    return filter_name in av.filter.filters_available
+            except Exception:
+                pass
+            return False
+
         if not hasattr(self, "_supported_filters"):
             try:
                 cmd = [self.ffmpeg_path, "-hide_banner", "-filters"]
@@ -463,13 +561,22 @@ class AudioEngine:
         pitch = effects.effective_pitch
         # Apply rubberband if speed or pitch differs from unity (1.0)
         if abs(speed - 1.0) > 1e-4 or abs(pitch - 1.0) > 1e-4:
-            if self.has_filter("rubberband") is False:
+            if self.has_filter("rubberband") is True or (self.has_filter("rubberband") is None and not getattr(self, "use_pyav", False)):
+                filters.append(f"rubberband=tempo={speed:.4f}:pitch={pitch:.4f}")
+            elif self.has_filter("rubberband") is False and not getattr(self, "use_pyav", False):
                 raise RuntimeError(
                     f"FFmpeg binary at '{self.ffmpeg_path}' does not support the 'rubberband' audio filter "
                     f"required for speed and pitch adjustments. Please install a full FFmpeg build "
                     f"(e.g., 'brew install ffmpeg-full' on macOS or Gyan full build on Windows)."
                 )
-            filters.append(f"rubberband=tempo={speed:.4f}:pitch={pitch:.4f}")
+            else:
+                if effects.link_pitch_to_speed:
+                    filters.append(f"asetrate=44100*{speed:.4f},aresample=44100")
+                else:
+                    filters.append(f"asetrate=44100*{pitch:.4f},aresample=44100")
+                    ratio = speed / pitch
+                    if abs(ratio - 1.0) > 1e-4:
+                        filters.append(f"atempo={ratio:.4f}")
 
         # 2. Bass Boost (0% - 100% maps to 0dB - 18dB gain at 100Hz)
         if effects.bass_boost_percent > 0.01:
@@ -500,6 +607,146 @@ class AudioEngine:
 
         return ",".join(filters)
 
+    def _export_audio_pyav(
+        self,
+        input_path: str,
+        output_path: str,
+        effects: AudioEffects,
+        export_format: Optional[str] = None,
+    ) -> Tuple[str, int]:
+        import av
+
+        effects.clamp_values()
+        ext = export_format or os.path.splitext(output_path)[1].lstrip(".").lower()
+        if not ext:
+            ext = "opus"
+        ext = ext.lower()
+
+        if ext not in ["opus", "mp3", "wav"]:
+            raise ValueError(f"Unsupported export format '{ext}'. Must be 'opus', 'mp3', or 'wav'.")
+
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        target_rate = 48000 if ext == "opus" else 44100
+
+        try:
+            in_c = av.open(input_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to open audio file '{input_path}': {e}")
+
+        with in_c:
+            if not in_c.streams.audio:
+                raise ValueError(f"No audio stream in '{input_path}'.")
+            in_s = in_c.streams.audio[0]
+
+            graph = av.filter.Graph()
+            source = graph.add_abuffer(template=in_s)
+            nodes = [source]
+
+            if effects.trim_start > 0.001:
+                try:
+                    in_c.seek(int(effects.trim_start * av.time_base))
+                except Exception:
+                    pass
+
+            speed = float(effects.speed)
+            pitch = float(effects.effective_pitch)
+            if abs(speed - 1.0) > 0.001 or abs(pitch - 1.0) > 0.001:
+                if effects.link_pitch_to_speed:
+                    new_rate = int(round(in_s.rate * speed))
+                    nodes.append(graph.add("asetrate", str(new_rate)))
+                    nodes.append(graph.add("aresample", str(target_rate)))
+                else:
+                    new_rate = int(round(in_s.rate * pitch))
+                    nodes.append(graph.add("asetrate", str(new_rate)))
+                    nodes.append(graph.add("aresample", str(target_rate)))
+                    ratio = speed / pitch
+                    if abs(ratio - 1.0) > 0.001:
+                        nodes.append(graph.add("atempo", f"{ratio:.4f}"))
+
+            if effects.bass_boost_percent > 0.01:
+                gain_db = (effects.bass_boost_percent / 100.0) * 18.0
+                nodes.append(graph.add("bass", f"g={gain_db:.2f}:f=100"))
+
+            if effects.reverb_percent > 0.01:
+                w = max(0.01, min(1.0, effects.reverb_percent / 100.0))
+                in_gain = max(0.68, 1.0 - (0.25 * w))
+                out_gain1 = min(0.85, 0.28 + (0.50 * w))
+                out_gain2 = out_gain1 * 0.70
+                d1 = "50|100|200|350"
+                decay1 = f"{max(0.01, 0.50 * w):.2f}|{max(0.01, 0.38 * w):.2f}|{max(0.01, 0.28 * w):.2f}|{max(0.01, 0.18 * w):.2f}"
+                nodes.append(graph.add("aecho", f"{in_gain:.2f}:{out_gain1:.2f}:{d1}:{decay1}"))
+                d2 = "70|150|300|600"
+                decay2 = f"{max(0.01, 0.35 * w):.2f}|{max(0.01, 0.25 * w):.2f}|{max(0.01, 0.18 * w):.2f}|{max(0.01, 0.10 * w):.2f}"
+                nodes.append(graph.add("aecho", f"{in_gain:.2f}:{out_gain2:.2f}:{d2}:{decay2}"))
+
+            if effects.bass_boost_percent > 0.01 or effects.reverb_percent > 0.01:
+                nodes.append(graph.add("alimiter", "limit=0.98"))
+
+            sample_fmt = "fltp" if ext in ("opus", "mp3") else "s16"
+            nodes.append(graph.add("aformat", f"sample_fmts={sample_fmt}:sample_rates={target_rate}:channel_layouts=stereo"))
+            sink = graph.add("abuffersink")
+            nodes.append(sink)
+
+            graph.link_nodes(*nodes)
+            graph.configure()
+
+            with av.open(output_path, mode="w") as out_c:
+                if ext == "opus":
+                    out_s = out_c.add_stream("libopus", rate=target_rate, layout="stereo")
+                    out_s.bit_rate = 160000
+                elif ext == "mp3":
+                    out_s = out_c.add_stream("libmp3lame", rate=target_rate, layout="stereo")
+                    out_s.bit_rate = 192000
+                elif ext == "wav":
+                    out_s = out_c.add_stream("pcm_s16le", rate=target_rate, layout="stereo")
+
+                samples_seen = 0
+                for frame in in_c.decode(in_s):
+                    frame_time = float(frame.time) if frame.time is not None else samples_seen / in_s.rate
+                    samples_seen += frame.samples
+                    if frame_time < effects.trim_start:
+                        continue
+                    if effects.trim_end is not None and frame_time > effects.trim_end:
+                        break
+
+                    try:
+                        graph.push(frame)
+                    except Exception:
+                        break
+
+                    while True:
+                        try:
+                            filt_frame = graph.pull()
+                            for packet in out_s.encode(filt_frame):
+                                out_c.mux(packet)
+                        except Exception:
+                            break
+
+                try:
+                    graph.push(None)
+                except Exception:
+                    pass
+                while True:
+                    try:
+                        filt_frame = graph.pull()
+                        for packet in out_s.encode(filt_frame):
+                            out_c.mux(packet)
+                    except Exception:
+                        break
+
+                for packet in out_s.encode(None):
+                    out_c.mux(packet)
+
+        if not os.path.isfile(output_path):
+            raise FileNotFoundError(f"Export output file was not created at '{output_path}'")
+        file_size = os.path.getsize(output_path)
+        if file_size == 0:
+            raise RuntimeError(f"Exported output file is empty (0 bytes): '{output_path}'")
+        return output_path, file_size
+
     def export_audio(
         self,
         input_path: str,
@@ -513,6 +760,9 @@ class AudioEngine:
         """
         if not os.path.isfile(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
+
+        if getattr(self, "use_pyav", False):
+            return self._export_audio_pyav(input_path, output_path, effects, export_format)
 
         effects.clamp_values()
         ext = export_format or os.path.splitext(output_path)[1].lstrip(".").lower()
@@ -576,6 +826,133 @@ class AudioEngine:
 
         return output_path, file_size
 
+    def _render_pcm_buffer_pyav(
+        self,
+        input_path: str,
+        effects: AudioEffects,
+        target_sample_rate: int = 44100,
+        max_duration_seconds: Optional[float] = None,
+    ) -> Tuple[np.ndarray, int]:
+        import av
+
+        effects.clamp_values()
+        try:
+            in_c = av.open(input_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to open audio file '{input_path}': {e}")
+
+        with in_c:
+            if not in_c.streams.audio:
+                raise ValueError(f"No audio stream in '{input_path}'.")
+            in_s = in_c.streams.audio[0]
+
+            graph = av.filter.Graph()
+            source = graph.add_abuffer(template=in_s)
+            nodes = [source]
+
+            if effects.trim_start > 0.001:
+                try:
+                    in_c.seek(int(effects.trim_start * av.time_base))
+                except Exception:
+                    pass
+
+            speed = float(effects.speed)
+            pitch = float(effects.effective_pitch)
+            if abs(speed - 1.0) > 0.001 or abs(pitch - 1.0) > 0.001:
+                if effects.link_pitch_to_speed:
+                    new_rate = int(round(in_s.rate * speed))
+                    nodes.append(graph.add("asetrate", str(new_rate)))
+                    nodes.append(graph.add("aresample", str(target_sample_rate)))
+                else:
+                    new_rate = int(round(in_s.rate * pitch))
+                    nodes.append(graph.add("asetrate", str(new_rate)))
+                    nodes.append(graph.add("aresample", str(target_sample_rate)))
+                    ratio = speed / pitch
+                    if abs(ratio - 1.0) > 0.001:
+                        nodes.append(graph.add("atempo", f"{ratio:.4f}"))
+
+            if effects.bass_boost_percent > 0.01:
+                gain_db = (effects.bass_boost_percent / 100.0) * 18.0
+                nodes.append(graph.add("bass", f"g={gain_db:.2f}:f=100"))
+
+            if effects.reverb_percent > 0.01:
+                w = max(0.01, min(1.0, effects.reverb_percent / 100.0))
+                in_gain = max(0.68, 1.0 - (0.25 * w))
+                out_gain1 = min(0.85, 0.28 + (0.50 * w))
+                out_gain2 = out_gain1 * 0.70
+                d1 = "50|100|200|350"
+                decay1 = f"{max(0.01, 0.50 * w):.2f}|{max(0.01, 0.38 * w):.2f}|{max(0.01, 0.28 * w):.2f}|{max(0.01, 0.18 * w):.2f}"
+                nodes.append(graph.add("aecho", f"{in_gain:.2f}:{out_gain1:.2f}:{d1}:{decay1}"))
+                d2 = "70|150|300|600"
+                decay2 = f"{max(0.01, 0.35 * w):.2f}|{max(0.01, 0.25 * w):.2f}|{max(0.01, 0.18 * w):.2f}|{max(0.01, 0.10 * w):.2f}"
+                nodes.append(graph.add("aecho", f"{in_gain:.2f}:{out_gain2:.2f}:{d2}:{decay2}"))
+
+            if effects.bass_boost_percent > 0.01 or effects.reverb_percent > 0.01:
+                nodes.append(graph.add("alimiter", "limit=0.98"))
+
+            nodes.append(graph.add("aformat", f"sample_fmts=fltp:sample_rates={target_sample_rate}:channel_layouts=stereo"))
+            sink = graph.add("abuffersink")
+            nodes.append(sink)
+
+            graph.link_nodes(*nodes)
+            graph.configure()
+
+            frames_out = []
+            max_samples = int(max_duration_seconds * target_sample_rate) if max_duration_seconds else None
+            samples_collected = 0
+
+            samples_seen = 0
+            for frame in in_c.decode(in_s):
+                frame_time = float(frame.time) if frame.time is not None else samples_seen / in_s.rate
+                samples_seen += frame.samples
+                if frame_time < effects.trim_start:
+                    continue
+                if effects.trim_end is not None and frame_time > effects.trim_end:
+                    break
+
+                try:
+                    graph.push(frame)
+                except Exception:
+                    break
+
+                while True:
+                    try:
+                        out_frame = graph.pull()
+                        arr = out_frame.to_ndarray()
+                        frames_out.append(arr)
+                        samples_collected += arr.shape[1]
+                        if max_samples and samples_collected >= max_samples:
+                            break
+                    except Exception:
+                        break
+
+                if max_samples and samples_collected >= max_samples:
+                    break
+
+            try:
+                graph.push(None)
+            except Exception:
+                pass
+            while True:
+                try:
+                    out_frame = graph.pull()
+                    arr = out_frame.to_ndarray()
+                    frames_out.append(arr)
+                    samples_collected += arr.shape[1]
+                    if max_samples and samples_collected >= max_samples:
+                        break
+                except Exception:
+                    break
+
+            if not frames_out:
+                return np.zeros((0, 2), dtype=np.float32), target_sample_rate
+
+            concatenated = np.concatenate(frames_out, axis=1)
+            if max_samples and concatenated.shape[1] > max_samples:
+                concatenated = concatenated[:, :max_samples]
+            stereo = np.ascontiguousarray(concatenated.T, dtype=np.float32)
+            return stereo, target_sample_rate
+
     def render_pcm_buffer(
         self,
         input_path: str,
@@ -589,6 +966,9 @@ class AudioEngine:
         """
         if not os.path.isfile(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
+
+        if getattr(self, "use_pyav", False):
+            return self._render_pcm_buffer_pyav(input_path, effects, target_sample_rate, max_duration_seconds)
 
         effects.clamp_values()
         cmd: List[str] = [self.ffmpeg_path, "-y"]
