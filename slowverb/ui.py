@@ -1,6 +1,7 @@
 """Desktop GUI for SlowVerb Studio using Flet with minimalistic square/robotic styling."""
 
 import asyncio
+import json
 import os
 import platform
 import sys
@@ -31,6 +32,7 @@ from slowverb.config import (
     DEFAULT_REVERB,
     DEFAULT_SPEED,
     FA_BOLT,
+    FA_BUG,
     FA_CHECK,
     FA_COPY,
     FA_EXPORT,
@@ -104,13 +106,14 @@ def save_file_desktop(initial_filename: str, ext: str, initial_dir: Optional[str
         root = tk.Tk()
         root.withdraw()
         root.wm_attributes("-topmost", True)
+        type_desc = f"{ext.upper()} File (*.{ext})" if ext.lower() in ("json", "txt", "log") else f"{ext.upper()} Audio (*.{ext})"
         selected = filedialog.asksaveasfilename(
             parent=root,
             initialdir=initial_dir or os.getcwd(),
             initialfile=initial_filename,
             defaultextension=f".{ext}",
             filetypes=[
-                (f"{ext.upper()} Audio (*.{ext})", f"*.{ext}"),
+                (type_desc, f"*.{ext}"),
                 ("All Files (*.*)", "*.*"),
             ],
         )
@@ -540,9 +543,16 @@ class SlowVerbApp:
         page: Optional[ft.Page] = None,
         ffmpeg_path: Optional[str] = None,
         force_mobile_ui: bool = False,
+        debug_mode: Optional[bool] = None,
     ):
         self.page = page
         self.force_mobile_ui = force_mobile_ui or (os.environ.get("SLOVERB_MOBILE_UI") in ("1", "true", "True"))
+        import slowverb
+        if debug_mode is not None:
+            self.debug_mode: bool = bool(debug_mode)
+        else:
+            self.debug_mode: bool = bool(getattr(slowverb, "DEBUG_MODE", False)) or (os.environ.get("SLOVERB_DEBUG") in ("1", "true", "True"))
+
         self.ffmpeg_path: Optional[str] = ffmpeg_path or find_ffmpeg()
         self.engine: Optional[AudioEngine] = None
         self.player: Optional[AudioPlayer] = None
@@ -566,6 +576,12 @@ class SlowVerbApp:
         from slowverb import __version__
 
         self.version: str = __version__
+        self._diagnostic_logger = None
+        if self.debug_mode:
+            from slowverb.debug import DiagnosticLogger
+            self._diagnostic_logger = DiagnosticLogger.get_instance()
+            self._diagnostic_logger.install()
+            self._diagnostic_logger.log(f"SlowVerb Studio v{self.version} started in DEBUG MODE")
         self._pending_cli_file: Optional[str] = None
         self.ffmpeg_setup_view: Optional[FFmpegSetupView] = None
 
@@ -871,6 +887,25 @@ class SlowVerbApp:
             size=11,
             color=COLOR_TEXT_DIM,
             weight=ft.FontWeight.BOLD,
+        )
+
+        self.debug_button = ft.Container(
+            content=ft.Text(
+                FA_BUG,
+                font_family=FONT_AWESOME_FONT,
+                size=11,
+                color=COLOR_AMBER,
+            ),
+            bgcolor=COLOR_SURFACE_LIGHT,
+            border=ft.Border.all(width=1, color=COLOR_AMBER),
+            shape=ft.BoxShape.CIRCLE,
+            width=24,
+            height=24,
+            alignment=ft.Alignment.CENTER,
+            tooltip="DUMP DIAGNOSTICS JSON",
+            on_click=lambda e: self._on_debug_dump_clicked(),
+            ink=True,
+            visible=self.debug_mode,
         )
 
         # Waveform peeking and timeline info
@@ -1321,7 +1356,8 @@ class SlowVerbApp:
             ft.Row([
                 self.format_badge_text,
                 self.version_badge_text,
-            ], spacing=10),
+                self.debug_button,
+            ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
         # File Loader Bar
@@ -1496,7 +1532,8 @@ class SlowVerbApp:
             ft.Row([
                 self.format_badge_text,
                 self.version_badge_text,
-            ], spacing=8),
+                self.debug_button,
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
         # Static Top Bar Row 1: File Picker (20%) + Status Bar (80%)
@@ -1719,7 +1756,10 @@ class SlowVerbApp:
 
     def _on_save_completed(self, target_path: str):
         """Called when an exported file is saved via FileService."""
-        self.set_status(f"EXPORT SAVED: '{os.path.basename(target_path)}'")
+        if target_path.lower().endswith(".json"):
+            self.set_status(f"DEBUG REPORT SAVED: '{os.path.basename(target_path)}'")
+        else:
+            self.set_status(f"EXPORT SAVED: '{os.path.basename(target_path)}'")
         self.update_ui()
 
     # --- File Loading & Analysis ---
@@ -2862,6 +2902,19 @@ class SlowVerbApp:
 
     def set_status(self, message: str, is_error: bool = False):
         """Updates the status footer banner and toggles copy error button."""
+        if getattr(self, "_diagnostic_logger", None):
+            if is_error:
+                self._diagnostic_logger.log_error(message)
+            else:
+                self._diagnostic_logger.log(message)
+        elif getattr(self, "debug_mode", False):
+            from slowverb.debug import DiagnosticLogger
+            logger = DiagnosticLogger.get_instance()
+            if is_error:
+                logger.log_error(message)
+            else:
+                logger.log(message)
+
         from slowverb.platform import is_mobile_environment
         is_mobile = getattr(self, "force_mobile_ui", False) or is_mobile_environment(self.page)
         text_val, font_sz = self._format_status_message(message, is_error=is_error)
@@ -2944,6 +2997,44 @@ class SlowVerbApp:
                 self.update_ui()
 
         threading.Thread(target=revert, daemon=True).start()
+
+    def _on_debug_dump_clicked(self):
+        """Generates a comprehensive diagnostics JSON report and prompts user to save it."""
+        try:
+            from slowverb.debug import generate_debug_dump
+            dump_data = generate_debug_dump(self)
+            json_str = json.dumps(dump_data, indent=2, default=str)
+            default_filename = "sloverb_debug_dump.json"
+
+            from slowverb.platform import is_mobile_platform
+            if not is_mobile_platform(self.page):
+                save_path = save_file_desktop(initial_filename=default_filename, ext="json")
+                if save_path:
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        f.write(json_str)
+                    self.set_status(f"DEBUG REPORT SAVED: '{os.path.basename(save_path)}'")
+                    if getattr(self, "_diagnostic_logger", None):
+                        self._diagnostic_logger.log(f"Debug report saved to {save_path}")
+            else:
+                import tempfile
+                temp_dir = tempfile.gettempdir()
+                temp_path = os.path.join(temp_dir, default_filename)
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    f.write(json_str)
+
+                if hasattr(self, "file_service") and self.file_service:
+                    self.file_service.save_exported_file(
+                        temp_exported_path=temp_path,
+                        default_filename=default_filename,
+                        allowed_extensions=["json"],
+                        dialog_title="SAVE DEBUG REPORT",
+                    )
+                else:
+                    self.set_status(f"DEBUG REPORT SAVED: '{temp_path}'")
+        except Exception as ex:
+            self.set_status(f"DEBUG DUMP FAILED: {str(ex).upper()}", is_error=True)
+            if getattr(self, "_diagnostic_logger", None):
+                self._diagnostic_logger.log_error(f"Debug dump failed: {ex}", exc=ex)
 
     def _effects_match(self, eff1: Optional[AudioEffects], eff2: Optional[AudioEffects]) -> bool:
         """Checks if two AudioEffects parameter sets have identical values."""

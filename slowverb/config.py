@@ -62,6 +62,7 @@ FA_UNDO = "\uf0e2"
 FA_SLIDERS = "\uf1de"
 FA_SCISSORS = "\uf0c4"
 FA_COPY = "\uf0c5"
+FA_BUG = "\uf188"
 
 
 

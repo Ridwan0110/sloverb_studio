@@ -1,6 +1,7 @@
 """SlowVerb Studio audio package."""
 
 __version__ = "0.4.0"
+DEBUG_MODE: bool = False
 
 from slowverb.config import (
     APP_NAME,
@@ -22,6 +23,7 @@ from slowverb.ui import FFmpegSetupView, SlowVerbApp
 
 __all__ = [
     "__version__",
+    "DEBUG_MODE",
     "APP_NAME",
     "AudioEngine",
     "AudioPlayer",
