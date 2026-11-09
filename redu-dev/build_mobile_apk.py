@@ -153,6 +153,15 @@ def run_build(args: Optional[argparse.Namespace] = None) -> int:
     else:
         print(">> Warning: Android SDK not found automatically.")
 
+    # Prevent Gradle download task race conditions on etags.json in multi-ABI builds
+    gradle_opts = os.environ.get("GRADLE_OPTS", "")
+    flags = ["-Dorg.gradle.parallel=false", "-Dorg.gradle.workers.max=1"]
+    for flag in flags:
+        if flag not in gradle_opts:
+            gradle_opts = f"{gradle_opts} {flag}".strip()
+    os.environ["GRADLE_OPTS"] = gradle_opts
+    print(f">> GRADLE_OPTS: {os.environ['GRADLE_OPTS']}")
+
     flet_exe = shutil.which("flet")
     if not flet_exe:
         bin_dir = Path(sys.executable).parent
