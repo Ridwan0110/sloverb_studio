@@ -74,8 +74,11 @@ def test_ffmpeg_setup_view_download_success():
         assert view.is_downloading is True
         assert view.progress_bar.visible is True
 
-        # Wait briefly for daemon download thread to execute
-        time.sleep(0.6)
+        # Wait for daemon download thread to execute
+        for _ in range(40):
+            if len(success_paths) > 0:
+                break
+            time.sleep(0.1)
 
         assert len(success_paths) == 1
         assert success_paths[0] == fake_binary
@@ -99,7 +102,10 @@ def test_ffmpeg_setup_view_download_failure():
 
     with patch("slowverb.ui.download_ffmpeg", side_effect=failing_download):
         view._on_download_click(None)
-        time.sleep(0.3)
+        for _ in range(30):
+            if view.is_downloading is False:
+                break
+            time.sleep(0.1)
 
         assert view.is_downloading is False
         assert view.progress_bar.visible is False

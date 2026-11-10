@@ -130,10 +130,11 @@ def test_main_mobile_ui_flag():
     with patch.dict(os.environ, {}, clear=False):
         os.environ.pop("SLOVERB_MOBILE_UI", None)
         with patch.object(sys, "argv", test_args):
-            app = sloverb_studio.main(mock_page)
-            assert app.force_mobile_ui is True
-            assert mock_page.window.width == 412
-            assert mock_page.window.height == 840
-            assert mock_page.window.min_width == 360
-            assert mock_page.window.min_height == 600
-            app.close()
+            with patch("slowverb.ui.find_ffmpeg", return_value="mock_ffmpeg.exe"):
+                app = sloverb_studio.main(mock_page)
+                assert app.force_mobile_ui is True
+                assert mock_page.window.width == 412
+                assert mock_page.window.height == 840
+                assert mock_page.window.min_width == 360
+                assert mock_page.window.min_height == 600
+                app.close()

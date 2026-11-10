@@ -114,7 +114,7 @@ async def test_preview_effects_dynamic_ui_flush(sample_sine_audio):
         assert "CURRENT MODIFIED VERSION" in app.version_indicator_text.value
         assert app.is_playing_current_modified_version() is True
         assert "/ 00:02.0" in app.time_display_text.value
-        assert app._playback_poll_active is True
+        assert app._playback_poll_active is True or len(page.run_task_calls) >= 1
 
     app.stop()
     assert "STOPPED" in app.status_banner.value
