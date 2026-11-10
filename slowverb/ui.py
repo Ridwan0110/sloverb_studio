@@ -588,7 +588,11 @@ class SlowVerbApp:
         self.metadata: Optional[AudioMetadata] = None
         self.waveform: WaveformData = WaveformData()
         self.effects = AudioEffects()
-        self.export_format = DEFAULT_EXPORT_FORMAT
+        from slowverb.platform import is_mobile_platform
+        if is_mobile_platform(self.page) or getattr(self, "force_mobile_ui", False):
+            self.export_format = "m4a"
+        else:
+            self.export_format = DEFAULT_EXPORT_FORMAT
 
         self.num_wave_bars = 90
         self.bar_width = 6.0
@@ -1644,7 +1648,7 @@ class SlowVerbApp:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
-        # Static Top Bar Row 2: Playback Controls & Trim (Left) + Render (Right)
+        # Static Top Bar Row 2: Playback Controls (Single Row)
         playback_controls = ft.Row([
             self._make_square_button("PLAY", lambda e: self.play(), accent_color=COLOR_ACCENT, fa_icon=FA_PLAY),
             self._make_square_button("PAUSE", lambda e: self.pause(), accent_color=COLOR_AMBER, fa_icon=FA_PAUSE),
@@ -1652,30 +1656,44 @@ class SlowVerbApp:
             self._make_square_button("REWIND", lambda e: self.seek(0.0), accent_color=COLOR_TEXT_DIM, fa_icon=FA_REWIND),
             self.trim_button,
             self.trim_mode_row,
-        ], spacing=6, alignment=ft.MainAxisAlignment.START, wrap=True)
+        ], spacing=6, alignment=ft.MainAxisAlignment.START, scroll=ft.ScrollMode.AUTO)
 
-        render_controls = ft.Row([
-            self._make_square_button(
-                "PREVIEW",
-                lambda e: self.render_and_play_preview(),
-                accent_color=COLOR_CYAN,
-                fa_icon=FA_MUSIC,
-            ),
-            self._make_square_button(
-                "EXPORT",
-                lambda e: self.show_export_format_dialog(),
-                accent_color=COLOR_ACCENT,
-                bg_color=COLOR_SURFACE,
-                fa_icon=FA_EXPORT,
-            ),
-        ], spacing=6, alignment=ft.MainAxisAlignment.END)
+        # Static Top Bar Row 3: Action Controls (Preview & Export taking 100% full row / 50-50)
+        preview_btn = ft.Container(
+            content=ft.Row([
+                ft.Text(FA_MUSIC, font_family=FONT_AWESOME_FONT, size=11, color=COLOR_CYAN),
+                ft.Text("PREVIEW", font_family=ROBOTIC_FONT, size=11, weight=ft.FontWeight.BOLD, color=COLOR_CYAN),
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=6),
+            bgcolor=COLOR_SURFACE_LIGHT,
+            border=ft.Border.all(width=1, color=COLOR_CYAN),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=9),
+            on_click=lambda e: self.render_and_play_preview(),
+            ink=True,
+            expand=1,
+        )
 
-        top_row_2 = ft.Row([playback_controls, render_controls], spacing=8, alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True)
+        export_btn = ft.Container(
+            content=ft.Row([
+                ft.Text(FA_EXPORT, font_family=FONT_AWESOME_FONT, size=11, color=COLOR_ACCENT),
+                ft.Text("EXPORT", font_family=ROBOTIC_FONT, size=11, weight=ft.FontWeight.BOLD, color=COLOR_ACCENT),
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=6),
+            bgcolor=COLOR_SURFACE_LIGHT,
+            border=ft.Border.all(width=1, color=COLOR_ACCENT),
+            border_radius=ft.BorderRadius.all(2),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=9),
+            on_click=lambda e: self.show_export_format_dialog(),
+            ink=True,
+            expand=1,
+        )
+
+        render_controls = ft.Row([preview_btn, export_btn], spacing=8)
 
         static_top_bar = ft.Container(
             content=ft.Column([
                 top_row_1,
-                top_row_2,
+                playback_controls,
+                render_controls,
             ], spacing=8),
             bgcolor=COLOR_SURFACE,
             border=ft.Border.all(width=1, color=COLOR_BORDER),
@@ -1822,7 +1840,17 @@ class SlowVerbApp:
         if target_path.lower().endswith(".json"):
             self.set_status(f"DEBUG REPORT SAVED: '{os.path.basename(target_path)}'")
         else:
-            self.set_status(f"EXPORT SAVED: '{os.path.basename(target_path)}'")
+            base = os.path.basename(target_path)
+            _, ext = os.path.splitext(base)
+            pending_fn = getattr(self.file_service, "_pending_filename", None) if hasattr(self, "file_service") and self.file_service else None
+            # On mobile SAF, target_path can be an opaque document ID number like '1' or '2'
+            if ext.lower() in (".m4a", ".mp3", ".opus", ".wav", ".aac", ".flac"):
+                clean_name = base
+            elif pending_fn:
+                clean_name = pending_fn
+            else:
+                clean_name = base
+            self.set_status(f"EXPORT SAVED: '{clean_name}'")
         self.update_ui()
 
     # --- File Loading & Analysis ---
@@ -1856,7 +1884,8 @@ class SlowVerbApp:
 
         save_path = save_file_desktop(initial_filename=initial_name, ext=ext)
         if save_path:
-            self.export_processed_track(custom_output_path=save_path)
+            chosen_ext = os.path.splitext(save_path)[1].lstrip(".").lower() or ext
+            self.export_processed_track(custom_output_path=save_path, export_format=chosen_ext)
 
     def load_file(self, filepath: str):
         """Loads an audio file, probes metadata, extracts waveform, and prepares player."""
@@ -2846,40 +2875,12 @@ class SlowVerbApp:
 
         format_buttons = [
             self._make_square_button(
-                "1. OPUS (160 KBPS HIGH EFFICIENCY - RECOMMENDED)",
-                lambda e: _select_and_export("opus"),
-                accent_color=COLOR_CYAN,
+                "1. M4A / AAC (192 KBPS UNIVERSAL)",
+                lambda e: _select_and_export("m4a"),
+                accent_color=COLOR_ACCENT,
                 bg_color=COLOR_SURFACE_LIGHT,
             ),
         ]
-
-        if hasattr(self.engine, "is_encoder_available") and self.engine.is_encoder_available("mp3"):
-            format_buttons.append(
-                self._make_square_button(
-                    "2. MP3 (192 KBPS UNIVERSAL)",
-                    lambda e: _select_and_export("mp3"),
-                    accent_color=COLOR_ACCENT,
-                    bg_color=COLOR_SURFACE_LIGHT,
-                )
-            )
-        else:
-            format_buttons.append(
-                self._make_square_button(
-                    "2. M4A / AAC (192 KBPS UNIVERSAL)",
-                    lambda e: _select_and_export("m4a"),
-                    accent_color=COLOR_ACCENT,
-                    bg_color=COLOR_SURFACE_LIGHT,
-                )
-            )
-
-        format_buttons.append(
-            self._make_square_button(
-                "3. WAV (LOSSLESS PCM)",
-                lambda e: _select_and_export("wav"),
-                accent_color=COLOR_AMBER,
-                bg_color=COLOR_SURFACE_LIGHT,
-            )
-        )
 
         dlg = ft.AlertDialog(
             title=ft.Text("EXPORT AUDIO TRACK", font_family=ROBOTIC_FONT, size=13, weight=ft.FontWeight.BOLD, color=COLOR_ACCENT),
@@ -2915,6 +2916,8 @@ class SlowVerbApp:
 
         # Determine target output path
         ext = (export_format or self.export_format).lower()
+        if is_mobile and ext in ("opus", "wav"):
+            ext = "m4a"
         if not custom_output_path:
             base, _ = os.path.splitext(self.current_filepath)
             # Descriptor tag based on active effects
