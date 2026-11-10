@@ -59,6 +59,7 @@ from slowverb.config import (
     PRESET_SLOWED_REVERB,
     ROBOTIC_FONT,
     Preset,
+    get_app_icon_path,
 )
 from slowverb.engine import (
     AudioEffects,
@@ -79,6 +80,12 @@ def pick_file_desktop(initial_dir: Optional[str] = None) -> Optional[str]:
         root = tk.Tk()
         root.withdraw()
         root.wm_attributes("-topmost", True)
+        ico = get_app_icon_path("32x") or get_app_icon_path("256x")
+        if ico and os.path.isfile(ico):
+            try:
+                root.iconbitmap(ico)
+            except Exception:
+                pass
         selected = filedialog.askopenfilename(
             parent=root,
             initialdir=initial_dir or os.getcwd(),
@@ -106,6 +113,12 @@ def save_file_desktop(initial_filename: str, ext: str, initial_dir: Optional[str
         root = tk.Tk()
         root.withdraw()
         root.wm_attributes("-topmost", True)
+        ico = get_app_icon_path("32x") or get_app_icon_path("256x")
+        if ico and os.path.isfile(ico):
+            try:
+                root.iconbitmap(ico)
+            except Exception:
+                pass
         type_desc = f"{ext.upper()} File (*.{ext})" if ext.lower() in ("json", "txt", "log") else f"{ext.upper()} Audio (*.{ext})"
         selected = filedialog.asksaveasfilename(
             parent=root,
@@ -822,6 +835,12 @@ class SlowVerbApp:
         }
 
         if hasattr(self.page, "window") and self.page.window:
+            app_icon = get_app_icon_path("256x")
+            if app_icon and hasattr(self.page.window, "icon"):
+                try:
+                    self.page.window.icon = app_icon
+                except Exception:
+                    pass
             if getattr(self, "force_mobile_ui", False):
                 try:
                     self.page.window.width = 412
@@ -864,6 +883,12 @@ class SlowVerbApp:
         }
 
         if hasattr(self.page, "window") and self.page.window:
+            app_icon = get_app_icon_path("256x")
+            if app_icon and hasattr(self.page.window, "icon"):
+                try:
+                    self.page.window.icon = app_icon
+                except Exception:
+                    pass
             try:
                 self.page.window.width = 850
                 self.page.window.height = 620

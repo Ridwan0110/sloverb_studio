@@ -144,3 +144,46 @@ def get_subprocess_no_window_kwargs() -> dict:
                 si.wShowWindow = subprocess.SW_HIDE
             kwargs["startupinfo"] = si
     return kwargs
+
+
+def get_app_icon_path(size: str = "256x") -> Optional[str]:
+    """
+    Locates the application icon file (.ico / .png) across the source tree,
+    assets directory, and PyInstaller frozen bundle.
+    Checks sizes in order of preference (requested size, 256x, 128x, 64x, 32x, 16x).
+    """
+    import sys
+    base_dirs = []
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base_dirs.append(os.path.join(sys._MEIPASS, "assets"))
+        base_dirs.append(sys._MEIPASS)
+
+    from slowverb.ffmpeg_manager import get_project_root
+    try:
+        project_root = get_project_root()
+    except Exception:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(current_dir, ".."))
+
+    base_dirs.append(os.path.join(project_root, "assets"))
+    base_dirs.append(project_root)
+
+    size_order = [size] if size else []
+    for s in ["256x", "128x", "64x", "32x", "16x"]:
+        if s not in size_order:
+            size_order.append(s)
+
+    candidates = []
+    for base in base_dirs:
+        for sub in ["image", "images", ""]:
+            for s in size_order:
+                candidates.append(os.path.join(base, sub, f"SloVerb Studio Icon-{s}.ico"))
+            candidates.append(os.path.join(base, sub, "icon.ico"))
+            candidates.append(os.path.join(base, sub, "icon.png"))
+
+    for c in candidates:
+        if c and os.path.isfile(c):
+            return os.path.abspath(c)
+
+    return None
+

@@ -100,3 +100,26 @@ def test_subprocess_no_window_kwargs():
         assert kwargs == {}
 
 
+def test_get_app_icon_path():
+    """Verify get_app_icon_path resolves valid .ico files across sizes."""
+    from slowverb.config import get_app_icon_path
+
+    # Resolves default (256x)
+    ico_256 = get_app_icon_path("256x")
+    assert ico_256 is not None
+    assert os.path.isfile(ico_256)
+    assert ico_256.lower().endswith(".ico")
+
+    # Resolves smaller size (32x)
+    ico_32 = get_app_icon_path("32x")
+    assert ico_32 is not None
+    assert os.path.isfile(ico_32)
+    assert "32x" in ico_32
+
+    # Resolves with fallback if requested size doesn't exist
+    fallback = get_app_icon_path("non_existent_size")
+    assert fallback is not None
+    assert os.path.isfile(fallback)
+
+
+

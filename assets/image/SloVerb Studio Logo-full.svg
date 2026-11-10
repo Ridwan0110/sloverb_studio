@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Subtle technical grid texture -->
+    <pattern id="cardGrid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#1C202C" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <!-- Card Container: Deep Surface (#151821) with 1px Charcoal Border (#2C3242) -->
+  <rect x="1" y="1" width="510" height="510" rx="2" ry="2" fill="#151821" stroke="#2C3242" stroke-width="2" />
+
+  <!-- Background Grid Texture -->
+  <rect x="2" y="2" width="508" height="508" fill="url(#cardGrid)" opacity="0.45" />
+
+  <!-- Header Row: Card Title & Status Badge -->
+  <text x="36" y="58" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#7B849B" letter-spacing="1.5">WAVEFORM // TRIM_BUFFER</text>
+  <text x="476" y="58" text-anchor="end" font-family="Consolas, monospace" font-size="10" font-weight="bold" fill="#00FFA3" letter-spacing="1">CURRENT</text>
+  
+  <!-- 1px Header Divider -->
+  <line x1="36" y1="72" x2="476" y2="72" stroke="#2C3242" stroke-width="1.5" />
+
+  <!-- Left Trim Marker [S]: Cyan Head Tab & Bracket Frame -->
+  <rect x="58" y="112" width="22" height="18" rx="2" ry="2" fill="#00D2FF" />
+  <text x="69" y="125" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#0D0E12" text-anchor="middle">S</text>
+  <path d="M 88 130 H 68 V 380 H 88" fill="none" stroke="#00D2FF" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter" />
+
+  <!-- Right Trim Marker [E]: Amber Head Tab & Bracket Frame -->
+  <rect x="432" y="112" width="22" height="18" rx="2" ry="2" fill="#FFB800" />
+  <text x="443" y="125" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#0D0E12" text-anchor="middle">E</text>
+  <path d="M 424 130 H 444 V 380 H 424" fill="none" stroke="#FFB800" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter" />
+
+  <!-- Waveform Centerline Track Reference -->
+  <line x1="104" y1="255" x2="408" y2="255" stroke="#1C202C" stroke-width="1" stroke-dasharray="3 3" />
+
+  <!-- Played Micro-Bars (Left Region: Neon Terminal Green #00FFA3) -->
+  <rect x="124" y="205" width="18" height="100" rx="1" ry="1" fill="#00FFA3" />
+  <rect x="156" y="165" width="18" height="180" rx="1" ry="1" fill="#00FFA3" />
+  <rect x="188" y="135" width="18" height="240" rx="1" ry="1" fill="#00FFA3" />
+  <rect x="220" y="155" width="18" height="200" rx="1" ry="1" fill="#00FFA3" />
+
+  <!-- Active Playhead: Digital Cyan (#00D2FF) with Square Head -->
+  <rect x="249" y="106" width="14" height="14" rx="2" ry="2" fill="#00D2FF" />
+  <line x1="256" y1="120" x2="256" y2="390" stroke="#00D2FF" stroke-width="2" />
+
+  <!-- Unplayed Micro-Bars (Right Region: Inactive Slate Charcoal #2C3446) -->
+  <rect x="274" y="145" width="18" height="220" rx="1" ry="1" fill="#2C3446" />
+  <rect x="306" y="175" width="18" height="160" rx="1" ry="1" fill="#2C3446" />
+  <rect x="338" y="160" width="18" height="190" rx="1" ry="1" fill="#2C3446" />
+  <rect x="370" y="210" width="18" height="90" rx="1" ry="1" fill="#2C3446" />
+
+  <!-- 1px Footer Divider -->
+  <line x1="36" y1="438" x2="476" y2="438" stroke="#2C3242" stroke-width="1.5" />
+
+  <!-- Footer Diagnostics & Playhead Timestamps -->
+  <text x="36" y="460" font-family="Consolas, monospace" font-size="13" font-weight="bold" fill="#00FFA3">00:42.1</text>
+  <text x="105" y="460" font-family="Consolas, monospace" font-size="13" font-weight="bold" fill="#7B849B">/ 02:18.4</text>
+  <text x="476" y="460" text-anchor="end" font-family="Consolas, monospace" font-size="11" fill="#7B849B">PEAK: -3.2 dB</text>
+</svg>
