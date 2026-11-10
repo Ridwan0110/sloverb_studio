@@ -1,4 +1,8 @@
-# SlowVerb Studio
+<p align="center">
+  <img src="assets/image/SloVerb Studio Logo-full.svg" alt="SloVerb Studio Logo" width="320">
+</p>
+
+# SloVerb Studio
 
 [![CI Tests](https://github.com/Ridwan0110/sloverb_studio/actions/workflows/ci.yaml/badge.svg)](https://github.com/Ridwan0110/slowverb/actions/workflows/ci.yaml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/)
