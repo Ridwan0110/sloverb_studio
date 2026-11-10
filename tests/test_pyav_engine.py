@@ -1,3 +1,4 @@
+import unittest.mock
 """
 Tests for PyAV-powered audio processing backend and mobile provider resolution.
 """
@@ -133,3 +134,46 @@ def test_pyav_has_filter():
     assert engine.has_filter("alimiter") is True
     assert engine.has_filter("rubberband") is False
     assert engine.has_filter("nonexistent_fake_filter_xyz") is False
+
+def test_pyav_resolve_audio_encoder():
+    """Verify fallback from external encoders (libopus, libmp3lame) to native encoders (opus, mp3)."""
+    import av
+    engine = AudioEngine(ffmpeg_path="pyav")
+
+    # Native resolution on desktop returns available encoder
+    assert engine._resolve_audio_encoder("opus") in ("libopus", "opus")
+    assert engine._resolve_audio_encoder("mp3") in ("libmp3lame", "mp3")
+    assert engine._resolve_audio_encoder("wav") == "pcm_s16le"
+
+    # Simulate mobile environment where libmp3lame and libopus are absent
+    real_codec = av.Codec
+    def mock_codec(name, mode='r'):
+        if name in ("libopus", "libmp3lame"):
+            raise av.error.CodecNotFoundError(f"Codec {name} not found")
+        return real_codec(name, mode)
+
+    import unittest.mock as mock
+    with mock.patch("av.Codec", side_effect=mock_codec):
+        assert engine._resolve_audio_encoder("opus") == "opus"
+        assert engine._resolve_audio_encoder("mp3") == "mp3"
+
+
+def test_pyav_engine_export_native_codecs(sample_sine_audio, tmp_path):
+    """Verify exporting audio works with native 'opus' and 'mp3' encoders directly."""
+    engine = AudioEngine(ffmpeg_path="pyav")
+    effects = AudioEffects(speed=1.0)
+
+    # Force native 'opus' encoder
+    with unittest.mock.patch.object(engine, "_resolve_audio_encoder", return_value="opus"):
+        out_opus = str(tmp_path / "native_output.opus")
+        path, size = engine.export_audio(sample_sine_audio, out_opus, effects, export_format="opus")
+        assert os.path.isfile(path)
+        assert size > 0
+
+    # Force native 'mp3' encoder
+    with unittest.mock.patch.object(engine, "_resolve_audio_encoder", return_value="mp3"):
+        out_mp3 = str(tmp_path / "native_output.mp3")
+        path, size = engine.export_audio(sample_sine_audio, out_mp3, effects, export_format="mp3")
+        assert os.path.isfile(path)
+        assert size > 0
+
