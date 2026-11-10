@@ -90,10 +90,15 @@ def test_builder_argument_parsing():
         assert args.debug is False
         assert args.target_os == "linux"
         assert args.target_arch == "arm64"
+        assert args.icon is None
 
     with patch("sys.argv", ["build_binary.py", "--debug"]):
         args_dbg = build_binary.parse_arguments()
         assert args_dbg.debug is True
+
+    with patch("sys.argv", ["build_binary.py", "--icon", "custom.ico"]):
+        args_icon = build_binary.parse_arguments()
+        assert args_icon.icon == "custom.ico"
 
 
 def test_bake_debug_mode_context_manager(tmp_path):
@@ -118,7 +123,7 @@ def test_bake_debug_mode_context_manager(tmp_path):
     assert init_py.read_text(encoding="utf-8") == original_text
 
 
-def test_build_mobile_apk_arguments_and_dry_run():
+def test_build_mobile_apk_arguments_and_dry_run(capsys):
     """Verify build_mobile_apk argument parsing and dry-run execution."""
     import build_mobile_apk
 
@@ -134,6 +139,11 @@ def test_build_mobile_apk_arguments_and_dry_run():
     assert ret == 0
     assert "-Dorg.gradle.parallel=false" in os.environ.get("GRADLE_OPTS", "")
     assert "-Dorg.gradle.workers.max=1" in os.environ.get("GRADLE_OPTS", "")
+
+    captured = capsys.readouterr()
+    assert "--android-adaptive-icon-background #0D0E12" in captured.out
+    assert "--splash-color #0D0E12" in captured.out
+    assert "--splash-dark-color #0D0E12" in captured.out
 
 
 def test_build_timer_lifecycle_and_formatting():

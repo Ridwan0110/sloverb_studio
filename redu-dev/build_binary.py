@@ -292,6 +292,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Explicit version override (defaults to slowverb.__version__ or package metadata)",
     )
     parser.add_argument(
+        "-i",
+        "--icon",
+        type=str,
+        default=None,
+        help="Path to an icon file for the executable (.ico on Windows, .png on Linux, .icns on macOS)",
+    )
+    parser.add_argument(
         "--debug",
         "--debug-mode",
         action="store_true",
@@ -454,12 +461,32 @@ def run_build(args: argparse.Namespace) -> int:
 
     windows_file_version = get_windows_file_version(app_version)
 
+    # Resolve executable icon
+    icon_path = None
+    if getattr(args, "icon", None) and os.path.isfile(args.icon):
+        icon_path = os.path.abspath(args.icon)
+    else:
+        for c in [
+            repo_root / "assets" / "image" / "SloVerb Studio Icon-256x.ico",
+            repo_root / "assets" / "image" / "SloVerb Studio Icon-128x.ico",
+            repo_root / "assets" / "image" / "SloVerb Studio Icon-64x.ico",
+            repo_root / "assets" / "image" / "SloVerb Studio Icon-32x.ico",
+            repo_root / "assets" / "icon.png",
+        ]:
+            if c.is_file():
+                icon_path = str(c.resolve())
+                break
+
     flet_args = [
         "flet",
         "pack",
         str(repo_root / "sloverb_studio.py"),
         "-n",
         args.name,
+    ]
+    if icon_path:
+        flet_args.extend(["-i", icon_path])
+    flet_args.extend([
         "--distpath",
         str(dist_dir),
         "--add-data",
@@ -483,7 +510,7 @@ def run_build(args: argparse.Namespace) -> int:
         "--copyright",
         "Copyright (C) 2026 SloVerb Studio",
         "-y",
-    ]
+    ])
 
     # Platform-specific packaging adjustments
     if target_os == "darwin":
