@@ -36,11 +36,11 @@ def test_build_ui_routing_mobile():
 
     static_top_bar = ui.controls[1]
     assert isinstance(static_top_bar, ft.Container)
-    # Static top bar has Column with 3 rows:
-    # Row 1: Load + Status, Row 2: Playback Controls (single row), Row 3: Preview & Export (50-50 full width)
+    # Static top bar has Column with 4 rows:
+    # Row 1: Load + Status, Row 2: Playback Controls (single row), Row 3: Trim Controls (100% width), Row 4: Preview & Export (50-50 full width)
     top_bar_column = static_top_bar.content
     assert isinstance(top_bar_column, ft.Column)
-    assert len(top_bar_column.controls) == 3
+    assert len(top_bar_column.controls) == 4
 
     row_1 = top_bar_column.controls[0]
     assert isinstance(row_1, ft.Row)
@@ -63,9 +63,15 @@ def test_build_ui_routing_mobile():
 
     playback_row = top_bar_column.controls[1]
     assert isinstance(playback_row, ft.Row)
-    assert len(playback_row.controls) >= 5
+    assert len(playback_row.controls) == 4
 
-    render_row = top_bar_column.controls[2]
+    trim_row = top_bar_column.controls[2]
+    assert isinstance(trim_row, ft.Row)
+    assert app.trim_button in trim_row.controls
+    assert app.trim_mode_row in trim_row.controls
+    assert app.trim_button.expand is True
+
+    render_row = top_bar_column.controls[3]
     assert isinstance(render_row, ft.Row)
     assert len(render_row.controls) == 2
     assert render_row.controls[0].expand == 1

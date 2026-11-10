@@ -1468,6 +1468,7 @@ class SlowVerbApp:
         )
 
         # Transport & Trim Bar
+        self.trim_button.expand = False
         transport_row = ft.Row([
             self._make_square_button("PLAY", lambda e: self.play(), accent_color=COLOR_ACCENT, fa_icon=FA_PLAY),
             self._make_square_button("PAUSE", lambda e: self.pause(), accent_color=COLOR_AMBER, fa_icon=FA_PAUSE),
@@ -1654,11 +1655,17 @@ class SlowVerbApp:
             self._make_square_button("PAUSE", lambda e: self.pause(), accent_color=COLOR_AMBER, fa_icon=FA_PAUSE),
             self._make_square_button("STOP", lambda e: self.stop(), accent_color=COLOR_RED, fa_icon=FA_STOP),
             self._make_square_button("REWIND", lambda e: self.seek(0.0), accent_color=COLOR_TEXT_DIM, fa_icon=FA_REWIND),
-            self.trim_button,
-            self.trim_mode_row,
         ], spacing=6, alignment=ft.MainAxisAlignment.START, scroll=ft.ScrollMode.AUTO)
 
-        # Static Top Bar Row 3: Action Controls (Preview & Export taking 100% full row / 50-50)
+        # Static Top Bar Row 3: Trim Controls (Full 100% Width Row)
+        self.trim_button.expand = True
+        self.trim_mode_row.expand = True
+        trim_controls_row = ft.Row([
+            self.trim_button,
+            self.trim_mode_row,
+        ], spacing=6)
+
+        # Static Top Bar Row 4: Action Controls (Preview & Export taking 100% full row / 50-50)
         preview_btn = ft.Container(
             content=ft.Row([
                 ft.Text(FA_MUSIC, font_family=FONT_AWESOME_FONT, size=11, color=COLOR_CYAN),
@@ -1693,6 +1700,7 @@ class SlowVerbApp:
             content=ft.Column([
                 top_row_1,
                 playback_controls,
+                trim_controls_row,
                 render_controls,
             ], spacing=8),
             bgcolor=COLOR_SURFACE,
