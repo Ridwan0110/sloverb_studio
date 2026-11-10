@@ -23,7 +23,7 @@ MAX_BASS = 100.0
 DEFAULT_BASS = 0.0
 
 # Supported export formats
-EXPORT_FORMATS = ["opus", "mp3"]
+EXPORT_FORMATS = ["opus", "mp3", "m4a", "wav"]
 DEFAULT_EXPORT_FORMAT = "opus"
 
 # Application branding
