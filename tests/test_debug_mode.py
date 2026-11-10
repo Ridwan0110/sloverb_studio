@@ -247,3 +247,19 @@ def test_debug_dump_mobile_save_flow(tmp_path):
         args = mock_save.call_args[0]
         # Check that json extension was passed
         assert call_kwargs.get("allowed_extensions") == ["json"] or (len(args) > 2 and args[2] == ["json"])
+
+
+def test_baked_debug_mode_propagates_on_mobile_launch(monkeypatch):
+    """Verifies that when DEBUG_MODE is True in slowverb package (as baked in APK builds),
+    sloverb_studio.main() initializes SlowVerbApp with debug_mode=True and mounts debug button."""
+    monkeypatch.setattr(slowverb, "DEBUG_MODE", True)
+    monkeypatch.delenv("SLOVERB_DEBUG", raising=False)
+
+    page = MockPage()
+    from sloverb_studio import main
+    # Mobile APK launch: empty CLI args
+    app = main(page, cli_args=None)
+    assert app.debug_mode is True
+    assert app.debug_button is not None
+    assert app.debug_button.visible is True
+    assert app.debug_button in page.overlay

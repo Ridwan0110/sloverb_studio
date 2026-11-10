@@ -27,9 +27,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Simulate mobile UI layout on desktop.",
     )
+    import slowverb
+    default_debug = bool(getattr(slowverb, "DEBUG_MODE", False)) or (os.environ.get("SLOVERB_DEBUG") in ("1", "true", "True"))
     parser.add_argument(
         "--debug",
         action="store_true",
+        default=default_debug,
         help="Enable debug mode with diagnostics export.",
     )
     parser.add_argument(
@@ -65,8 +68,8 @@ def parse_cli_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     if getattr(args, "mobile_ui", False):
         os.environ["SLOVERB_MOBILE_UI"] = "1"
 
-    if getattr(args, "debug", False):
-        import slowverb
+    import slowverb
+    if getattr(args, "debug", False) or bool(getattr(slowverb, "DEBUG_MODE", False)):
         slowverb.DEBUG_MODE = True
         os.environ["SLOVERB_DEBUG"] = "1"
 
@@ -82,8 +85,13 @@ def main(page: ft.Page, cli_args: Optional[argparse.Namespace] = None):
         else:
             cli_args = parse_cli_args()
 
+    import slowverb
     force_mobile = bool(getattr(cli_args, "mobile_ui", False)) or (os.environ.get("SLOVERB_MOBILE_UI") in ("1", "true", "True"))
-    debug_mode = bool(getattr(cli_args, "debug", False)) or (os.environ.get("SLOVERB_DEBUG") in ("1", "true", "True"))
+    debug_mode = (
+        bool(getattr(cli_args, "debug", False))
+        or bool(getattr(slowverb, "DEBUG_MODE", False))
+        or (os.environ.get("SLOVERB_DEBUG") in ("1", "true", "True"))
+    )
     app = SlowVerbApp(page, force_mobile_ui=force_mobile, debug_mode=debug_mode)
 
     # If an audio file was passed via command line argument, load it directly
