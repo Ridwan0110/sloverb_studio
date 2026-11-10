@@ -622,13 +622,14 @@ class AudioEngine:
         """
         ext_clean = ext.lstrip(".").lower()
         if getattr(self, "use_pyav", False):
+            # OPUS and WAV are disabled on mobile
+            if ext_clean in ("opus", "wav"):
+                return False
             import av
             candidates = {
-                "opus": ["libopus", "opus"],
-                "mp3": ["libmp3lame"],
                 "m4a": ["aac", "libfdk_aac"],
                 "aac": ["aac", "libfdk_aac"],
-                "wav": ["pcm_s16le"],
+                "mp3": ["libmp3lame"],
                 "flac": ["flac"],
             }.get(ext_clean, [ext_clean])
             for name in candidates:
@@ -647,12 +648,14 @@ class AudioEngine:
         """Resolves the best available audio encoder name in runtime FFmpeg / PyAV."""
         import av
         ext_clean = ext.lstrip(".").lower()
+        if ext_clean in ("opus", "wav"):
+            raise RuntimeError(
+                f"Export format '{ext_clean}' is currently disabled on mobile. Please export as 'm4a'."
+            )
         candidates = {
-            "opus": ["libopus", "opus"],
-            "mp3": ["libmp3lame"],
             "m4a": ["aac", "libfdk_aac"],
             "aac": ["aac", "libfdk_aac"],
-            "wav": ["pcm_s16le"],
+            "mp3": ["libmp3lame"],
             "flac": ["flac"],
         }.get(ext_clean, [ext_clean])
 
@@ -687,17 +690,20 @@ class AudioEngine:
         effects.clamp_values()
         ext = export_format or os.path.splitext(output_path)[1].lstrip(".").lower()
         if not ext:
-            ext = "opus"
+            ext = "m4a"
         ext = ext.lower()
 
-        if ext not in ["opus", "mp3", "wav", "m4a", "aac", "flac"]:
-            raise ValueError(f"Unsupported export format '{ext}'. Must be 'opus', 'mp3', 'wav', 'm4a', 'aac', or 'flac'.")
+        if ext in ["opus", "wav"]:
+            raise ValueError(f"Export format '{ext}' is currently disabled on mobile. Please export as 'm4a'.")
+
+        if ext not in ["m4a", "aac", "mp3", "flac"]:
+            raise ValueError(f"Unsupported export format '{ext}'. Must be 'm4a'.")
 
         out_dir = os.path.dirname(os.path.abspath(output_path))
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
 
-        target_rate = 48000 if ext == "opus" else 44100
+        target_rate = 44100
 
         try:
             in_c = av.open(input_path)
