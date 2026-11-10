@@ -2844,23 +2844,49 @@ class SlowVerbApp:
         def _cancel(e):
             self._close_dialog(dlg)
 
-        dlg = ft.AlertDialog(
-            title=ft.Text("EXPORT AUDIO TRACK", font_family=ROBOTIC_FONT, size=13, weight=ft.FontWeight.BOLD, color=COLOR_ACCENT),
-            content=ft.Column([
-                ft.Text("SELECT OUTPUT AUDIO FORMAT:", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT_DIM),
-                ft.Container(height=6),
-                self._make_square_button(
-                    "1. OPUS (160 KBPS HIGH EFFICIENCY)",
-                    lambda e: _select_and_export("opus"),
-                    accent_color=COLOR_CYAN,
-                    bg_color=COLOR_SURFACE_LIGHT,
-                ),
+        format_buttons = [
+            self._make_square_button(
+                "1. OPUS (160 KBPS HIGH EFFICIENCY - RECOMMENDED)",
+                lambda e: _select_and_export("opus"),
+                accent_color=COLOR_CYAN,
+                bg_color=COLOR_SURFACE_LIGHT,
+            ),
+        ]
+
+        if hasattr(self.engine, "is_encoder_available") and self.engine.is_encoder_available("mp3"):
+            format_buttons.append(
                 self._make_square_button(
                     "2. MP3 (192 KBPS UNIVERSAL)",
                     lambda e: _select_and_export("mp3"),
                     accent_color=COLOR_ACCENT,
                     bg_color=COLOR_SURFACE_LIGHT,
-                ),
+                )
+            )
+        else:
+            format_buttons.append(
+                self._make_square_button(
+                    "2. M4A / AAC (192 KBPS UNIVERSAL)",
+                    lambda e: _select_and_export("m4a"),
+                    accent_color=COLOR_ACCENT,
+                    bg_color=COLOR_SURFACE_LIGHT,
+                )
+            )
+
+        format_buttons.append(
+            self._make_square_button(
+                "3. WAV (LOSSLESS PCM)",
+                lambda e: _select_and_export("wav"),
+                accent_color=COLOR_AMBER,
+                bg_color=COLOR_SURFACE_LIGHT,
+            )
+        )
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("EXPORT AUDIO TRACK", font_family=ROBOTIC_FONT, size=13, weight=ft.FontWeight.BOLD, color=COLOR_ACCENT),
+            content=ft.Column([
+                ft.Text("SELECT OUTPUT AUDIO FORMAT:", font_family=ROBOTIC_FONT, size=11, color=COLOR_TEXT_DIM),
+                ft.Container(height=6),
+                *format_buttons,
             ], spacing=8, tight=True),
             actions=[
                 self._make_square_button("CANCEL", _cancel, accent_color=COLOR_TEXT_DIM, bg_color=COLOR_SURFACE),
