@@ -177,7 +177,7 @@ def run_build(args: Optional[argparse.Namespace] = None) -> int:
         "build",
         "apk",
         "--project", "sloverb_studio",
-        "--org", "com.redu.sloverb",
+        "--org", "com.redu.dev",
         "--product", "SloVerb Studio",
         "--module-name", "sloverb_studio.py",
         "--android-legacy-packaging",
