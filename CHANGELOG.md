@@ -3,25 +3,16 @@
 Release v0.4.0 introduces an interactive visual waveform trimming system with draggable marker heads and preview playback bounds, non-destructive audio editing with bidirectional time mapping across speed changes, playhead persistence across mode transitions, and Windows binary packaging fixes.
 
 ## Added
-- Interactive visual waveform trim mode with draggable start and end marker heads and real-time gesture tracking (feature)
-- Bounded preview playback confined to active trim selection with automatic pause and rewind on completion (feature)
-- Non-destructive trimming preserving full track audio buffers and allowing outward duration extensions (feature)
-- Bidirectional time space mapping translating trim bounds seamlessly across playback speed adjustments (feature)
-- Playhead persistence maintaining active playback position across trim mode transitions (feature)
-- Dynamic duration readout updates when modifying playback speed or applying presets on trimmed audio (feature)
-- Comprehensive test coverage for visual trim gestures, collision prevention, and non-destructive editing (improvement)
+- Interactive visual waveform trim mode with draggable start and end marker heads and real-time gesture tracking (feature) #7 
 - Packaging version resolution pipeline with fallback strategies and Windows PE version formatting (improvement)
 - Architecture documentation and developer guidelines for visual trim geometry and time domains (misc)
 
 ## Changed
 - Replaced legacy numeric trim input fields with interactive trim toggle buttons (improvement)
-- Bumped application version to 0.4.0 (misc)
 
 ## Fixed
-- Fixed track reset issue in trim mode by preserving the current DSP-modified buffer instead of reverting to raw audio (bug)
 - Fixed upstream flet-cli crash on Windows caused by binary file open with encoding argument during packaging (bug)
 - Fixed packaging failure when resolving application version by falling back to safe numeric defaults instead of UNKNOWN (bug)
-- Confined zero-duration deletion notice beside trim action buttons instead of overriding the main status banner (bug)
 
 ## Version: v0.3.0
 
@@ -29,7 +20,7 @@ Release v0.3.0 brings major memory optimizations for large audio processing, a s
 
 ## Added
 - Memory-mapped buffer streaming and chunked peak analysis for handling audio files exceeding 50MB without memory exhaustion (feature)
-- Status bar error copy button with real-time visual feedback confirming clipboard actions (feature)
+- Status bar error copy button with real-time visual feedback confirming clipboard actions (feature) #4
 - Native Win32 and Unix command-line clipboard integration with error detection and reporting (feature)
 - Mobile platform clipboard support with Flet service fallback for Android and iOS environments (feature)
 - Console suppression helper for executing background subprocesses without terminal window popups (improvement)
@@ -42,10 +33,10 @@ Release v0.3.0 brings major memory optimizations for large audio processing, a s
 - Dynamically asserted package version metadata across test suites (improvement)
 
 ## Fixed
-- Fixed out-of-memory crashes and subprocess pipe deadlocks when processing large audio files (bug)
+- Fixed out-of-memory crashes and subprocess pipe deadlocks when processing large audio files (bug) #1 
 - Fixed unwanted terminal window flashing on Windows by applying no-window flags to all subprocess calls (bug)
-- Fixed audio filter errors at low reverb settings by enforcing a 0.01 minimum reflection decay floor (bug)
-- Fixed Unicode decoding errors when processing audio files with international titles and multi-byte characters (bug)
+- Fixed audio filter errors at low reverb settings by enforcing a 0.01 minimum reflection decay floor (bug) #5 
+- Fixed Unicode decoding errors when processing audio files with international titles and multi-byte characters (bug) #2 
 
 ## Removed
 - Removed Tkinter dependency from desktop clipboard handling pipeline (improvement)
