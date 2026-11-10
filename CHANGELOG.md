@@ -1,3 +1,39 @@
+## Version: v1.0.0
+
+Release v1.0.0 marks the official major release of SloVerb Studio, introducing full Android mobile support with a responsive cyber terminal interface, an in-process PyAV audio DSP engine, low-latency cross-platform audio player abstractions, unified mobile file picker and cache services, comprehensive diagnostics telemetry export, automated APK release workflows, and official branding assets.
+
+## Added
+- Android mobile support with APK packaging pipeline and automated multi-ABI release workflows (feature)
+- Responsive mobile user interface featuring animated tab switching between waveform peeking and audio effects (feature)
+- In-process PyAV DSP engine executing C audio filter graphs for mobile playback rendering and M4A export (feature)
+- Audio player abstraction layer with desktop PortAudio streaming and mobile platform channel drivers (feature)
+- Cross-platform file service supporting desktop dialogs and Android Storage Access Framework with URI caching (feature)
+- Static multi-row mobile top bar with compact file loader, transport controls, full-width trim row, and action buttons (feature)
+- Diagnostics and telemetry suite with in-memory ring-buffer logging and JSON dump export (feature)
+- Interactive overlay debug button providing one-click telemetry generation when debug mode is active (feature)
+- Desktop command-line flag --mobile-ui for simulating and testing mobile layouts on desktop environments (feature)
+- Official application branding assets including window icons, packaging icons, mobile splash screens, and vector logos (misc)
+- Comprehensive platform and subsystem capabilities matrix documentation (misc)
+- Unit and integration tests for PyAV DSP filters, mobile UI layout, platform detection, and player abstractions (improvement)
+
+## Changed
+- Migrated mobile audio and file picker registration from page overlay to Flet services (improvement)
+- Standardized mobile audio export to high-compatibility M4A container with AAC encoding (improvement)
+- Configured dedicated application package identifier for Android release distribution (misc)
+- Updated architecture documentation and development guidelines for cross-platform and mobile design (misc)
+- Bumped application version to 1.0.0 (misc)
+
+## Fixed
+- Fixed mobile playhead desynchronization when resuming playback from pause (bug)
+- Fixed file name loss by preserving original filenames when importing audio through mobile storage pickers (bug)
+- Fixed multi-ABI build race conditions in Android packaging scripts (bug)
+- Resolved upstream PyAV audio bitrate formatting and sample rate validation errors during mobile encoding (bug)
+- Stabilized async playback poller and test suite timing race conditions across environments (bug)
+- Aligned debug overlay button placement within mobile safe-area viewport boundaries (bug)
+
+## Removed
+- Removed intrusive debug tag labels from UI headers across desktop and mobile layouts (improvement)
+
 ## Version: v0.4.0
 
 Release v0.4.0 introduces an interactive visual waveform trimming system with draggable marker heads and preview playback bounds, non-destructive audio editing with bidirectional time mapping across speed changes, playhead persistence across mode transitions, and Windows binary packaging fixes.
