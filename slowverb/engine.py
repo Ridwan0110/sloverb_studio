@@ -615,23 +615,64 @@ class AudioEngine:
 
         return ",".join(filters)
 
+    def is_encoder_available(self, ext: str) -> bool:
+        """
+        Checks whether an audio encoder for the requested format extension is available
+        in the active backend (PyAV or standalone FFmpeg binary).
+        """
+        ext_clean = ext.lstrip(".").lower()
+        if getattr(self, "use_pyav", False):
+            import av
+            candidates = {
+                "opus": ["libopus", "opus"],
+                "mp3": ["libmp3lame"],
+                "m4a": ["aac", "libfdk_aac"],
+                "aac": ["aac", "libfdk_aac"],
+                "wav": ["pcm_s16le"],
+                "flac": ["flac"],
+            }.get(ext_clean, [ext_clean])
+            for name in candidates:
+                try:
+                    c = av.Codec(name, "w")
+                    if c and getattr(c, "is_encoder", True):
+                        return True
+                except Exception:
+                    continue
+            return False
+        else:
+            return True
+
     @staticmethod
     def _resolve_audio_encoder(ext: str) -> str:
         """Resolves the best available audio encoder name in runtime FFmpeg / PyAV."""
         import av
+        ext_clean = ext.lstrip(".").lower()
         candidates = {
             "opus": ["libopus", "opus"],
-            "mp3": ["libmp3lame", "mp3"],
+            "mp3": ["libmp3lame"],
+            "m4a": ["aac", "libfdk_aac"],
+            "aac": ["aac", "libfdk_aac"],
             "wav": ["pcm_s16le"],
-        }.get(ext.lower(), [ext.lower()])
+            "flac": ["flac"],
+        }.get(ext_clean, [ext_clean])
 
         for name in candidates:
             try:
-                av.Codec(name, "w")
-                return name
+                c = av.Codec(name, "w")
+                if c and getattr(c, "is_encoder", True):
+                    return name
             except Exception:
                 continue
-        return candidates[-1]
+
+        if ext_clean == "mp3":
+            raise RuntimeError(
+                "MP3 encoding (libmp3lame) is not supported in mobile runtime. "
+                "Please select OPUS or M4A."
+            )
+        raise RuntimeError(
+            f"No suitable audio encoder found for format '{ext_clean}'. "
+            f"Candidates {candidates} are not supported by the active FFmpeg / PyAV build."
+        )
 
     def _export_audio_pyav(
         self,
@@ -641,6 +682,7 @@ class AudioEngine:
         export_format: Optional[str] = None,
     ) -> Tuple[str, int]:
         import av
+        import fractions
 
         effects.clamp_values()
         ext = export_format or os.path.splitext(output_path)[1].lstrip(".").lower()
@@ -648,8 +690,8 @@ class AudioEngine:
             ext = "opus"
         ext = ext.lower()
 
-        if ext not in ["opus", "mp3", "wav"]:
-            raise ValueError(f"Unsupported export format '{ext}'. Must be 'opus', 'mp3', or 'wav'.")
+        if ext not in ["opus", "mp3", "wav", "m4a", "aac", "flac"]:
+            raise ValueError(f"Unsupported export format '{ext}'. Must be 'opus', 'mp3', 'wav', 'm4a', 'aac', or 'flac'.")
 
         out_dir = os.path.dirname(os.path.abspath(output_path))
         if out_dir:
@@ -712,20 +754,47 @@ class AudioEngine:
                 nodes.append(graph.add("alimiter", "limit=0.98"))
 
             encoder_name = self._resolve_audio_encoder(ext)
+            codec = av.Codec(encoder_name, "w")
+            supported_fmts = [f.name for f in getattr(codec, "audio_formats", []) or []]
+
+            # Choose optimal supported sample format for the resolved codec
+            preferred_order = ["fltp", "flt", "s16"] if ext in ("opus", "mp3", "m4a", "aac") else ["s16", "flt", "fltp"]
+            target_sample_fmt = "fltp"
+            for preferred in preferred_order:
+                if preferred in supported_fmts:
+                    target_sample_fmt = preferred
+                    break
+            else:
+                if supported_fmts:
+                    target_sample_fmt = supported_fmts[0]
+                else:
+                    target_sample_fmt = "fltp" if ext in ("opus", "mp3", "m4a", "aac") else "s16"
 
             with av.open(output_path, mode="w") as out_c:
-                out_s = out_c.add_stream(encoder_name, rate=target_rate, layout="stereo")
-                if ext in ("opus", "mp3"):
+                options = {"strict": "-2"}
+                out_s = out_c.add_stream(
+                    encoder_name,
+                    rate=target_rate,
+                    layout="stereo",
+                    format=target_sample_fmt,
+                    options=options,
+                )
+                if ext in ("opus", "mp3", "m4a", "aac"):
                     out_s.bit_rate = 160000 if ext == "opus" else 192000
 
-                sample_fmt = out_s.format.name if out_s.format else ("fltp" if ext in ("opus", "mp3") else "s16")
-                nodes.append(graph.add("aformat", f"sample_fmts={sample_fmt}:sample_rates={target_rate}:channel_layouts=stereo"))
+                try:
+                    out_s.time_base = fractions.Fraction(1, target_rate)
+                except Exception:
+                    pass
+
+                nodes.append(graph.add("aformat", f"sample_fmts={target_sample_fmt}:sample_rates={target_rate}:channel_layouts=stereo"))
                 sink = graph.add("abuffersink")
                 nodes.append(sink)
 
                 graph.link_nodes(*nodes)
                 graph.configure()
 
+                pts_offset = None
                 samples_seen = 0
                 stream_rate = in_s.rate or target_rate or 44100
                 for frame in in_c.decode(in_s):
@@ -744,22 +813,37 @@ class AudioEngine:
                     while True:
                         try:
                             filt_frame = graph.pull()
-                            for packet in out_s.encode(filt_frame):
-                                out_c.mux(packet)
+                        except (av.error.BlockingIOError, av.error.EOFError):
+                            break
                         except Exception:
                             break
+
+                        if pts_offset is None and filt_frame.pts is not None:
+                            pts_offset = filt_frame.pts
+                        if pts_offset is not None and filt_frame.pts is not None:
+                            filt_frame.pts -= pts_offset
+
+                        for packet in out_s.encode(filt_frame):
+                            out_c.mux(packet)
 
                 try:
                     graph.push(None)
                 except Exception:
                     pass
+
                 while True:
                     try:
                         filt_frame = graph.pull()
-                        for packet in out_s.encode(filt_frame):
-                            out_c.mux(packet)
+                    except (av.error.BlockingIOError, av.error.EOFError):
+                        break
                     except Exception:
                         break
+
+                    if pts_offset is not None and filt_frame.pts is not None:
+                        filt_frame.pts -= pts_offset
+
+                    for packet in out_s.encode(filt_frame):
+                        out_c.mux(packet)
 
                 for packet in out_s.encode(None):
                     out_c.mux(packet)
@@ -794,8 +878,8 @@ class AudioEngine:
             ext = "opus"
         ext = ext.lower()
 
-        if ext not in ["opus", "mp3", "wav"]:
-            raise ValueError(f"Unsupported export format '{ext}'. Must be 'opus', 'mp3', or 'wav'.")
+        if ext not in ["opus", "mp3", "wav", "m4a", "aac", "flac"]:
+            raise ValueError(f"Unsupported export format '{ext}'. Must be 'opus', 'mp3', 'wav', 'm4a', 'aac', or 'flac'.")
 
         # Ensure output directory exists
         out_dir = os.path.dirname(os.path.abspath(output_path))
@@ -824,8 +908,12 @@ class AudioEngine:
             cmd.extend(["-c:a", "libopus", "-b:a", "160k", "-vbr", "on"])
         elif ext == "mp3":
             cmd.extend(["-c:a", "libmp3lame", "-b:a", "192k", "-q:a", "2"])
+        elif ext in ("m4a", "aac"):
+            cmd.extend(["-c:a", "aac", "-b:a", "192k"])
         elif ext == "wav":
             cmd.extend(["-c:a", "pcm_s16le"])
+        elif ext == "flac":
+            cmd.extend(["-c:a", "flac"])
 
         cmd.append(os.path.abspath(output_path))
 
