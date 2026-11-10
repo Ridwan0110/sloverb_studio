@@ -78,14 +78,15 @@ class FileService:
                         if len(val) > 0:
                             f = val[0]
                             selected_path = getattr(f, "path", None)
+                            orig_name = getattr(f, "name", None)
                             if not selected_path and getattr(f, "bytes", None):
-                                ext = os.path.splitext(getattr(f, "name", "audio.tmp"))[1] or ".opus"
+                                ext = os.path.splitext(orig_name or "audio.tmp")[1] or ".opus"
                                 fd, temp_p = tempfile.mkstemp(prefix="picked_", suffix=ext)
                                 with os.fdopen(fd, "wb") as out_f:
                                     out_f.write(f.bytes)
                                 selected_path = temp_p
                             if selected_path:
-                                self._handle_file_picked(selected_path)
+                                self._handle_file_picked(selected_path, original_filename=orig_name)
                     # Handle save_file result (target path string)
                     elif isinstance(val, str) and val:
                         self._handle_save_completed(val)
@@ -113,7 +114,7 @@ class FileService:
                 except Exception:
                     pass
 
-    def _handle_file_picked(self, selected_path: str):
+    def _handle_file_picked(self, selected_path: str, original_filename: Optional[str] = None):
         """Processes picked file path, ensures local caching if needed, and notifies listener."""
         if not selected_path:
             return
@@ -126,10 +127,10 @@ class FileService:
         self._last_picked_path = selected_path
         self._last_picked_time = now
 
-        # On mobile, cache file to app temp dir to ensure persistence and accessible path
+        # On mobile, cache file to app temp dir preserving the original filename
         if is_mobile_platform(self.page) and os.path.isfile(selected_path):
-            ext = os.path.splitext(selected_path)[1]
-            safe_dest = os.path.join(tempfile.gettempdir(), f"sloverb_picked_track{ext}")
+            filename = original_filename or os.path.basename(selected_path)
+            safe_dest = os.path.join(tempfile.gettempdir(), filename)
             try:
                 if os.path.abspath(selected_path) != os.path.abspath(safe_dest):
                     shutil.copy2(selected_path, safe_dest)
@@ -242,15 +243,16 @@ class FileService:
         if e.files and len(e.files) > 0:
             f = e.files[0]
             selected_path = getattr(f, "path", None)
+            orig_name = getattr(f, "name", None)
             if not selected_path and getattr(f, "bytes", None):
-                ext = os.path.splitext(getattr(f, "name", "audio.tmp"))[1] or ".opus"
+                ext = os.path.splitext(orig_name or "audio.tmp")[1] or ".opus"
                 fd, temp_p = tempfile.mkstemp(prefix="picked_", suffix=ext)
                 with os.fdopen(fd, "wb") as out_f:
                     out_f.write(f.bytes)
                 selected_path = temp_p
 
             if selected_path:
-                self._handle_file_picked(selected_path)
+                self._handle_file_picked(selected_path, original_filename=orig_name)
             return
 
         # Handle save file result

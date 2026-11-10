@@ -184,3 +184,20 @@ def test_file_service_save_async_resolution():
     if os.path.isfile(target_export):
         os.remove(target_export)
 
+def test_file_service_preserves_original_filename(tmp_path):
+    """Verify that picking an audio file preserves original filename in cache on mobile."""
+    page = MagicMock()
+    page.platform = ft.PagePlatform.ANDROID
+    page.overlay = []
+    page.services = []
+
+    test_src = tmp_path / "original_track_name.opus"
+    test_src.write_bytes(b"mock audio bytes")
+
+    picked = []
+    service = FileService(page=page, on_file_picked=lambda p: picked.append(p))
+
+    service._handle_file_picked(str(test_src), original_filename="original_track_name.opus")
+    assert len(picked) == 1
+    assert os.path.basename(picked[0]) == "original_track_name.opus"
+
