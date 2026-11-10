@@ -302,11 +302,19 @@ def generate_debug_dump(app: Any = None) -> Dict[str, Any]:
     plat_type = detect_platform(page)
     logger = DiagnosticLogger.get_instance()
 
+    app_version = getattr(app, "version", None)
+    if not app_version:
+        try:
+            import slowverb
+            app_version = getattr(slowverb, "__version__", "1.0.0")
+        except Exception:
+            app_version = "1.0.0"
+
     dump: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "app": {
             "name": APP_NAME,
-            "version": getattr(app, "version", "0.4.0"),
+            "version": app_version,
             "debug_mode": getattr(app, "debug_mode", True) if app else True,
             "is_frozen": getattr(sys, "frozen", False),
             "python_executable": sys.executable,
