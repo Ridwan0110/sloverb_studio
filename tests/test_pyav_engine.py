@@ -126,6 +126,20 @@ def test_pyav_engine_export_wav(sample_sine_audio, tmp_path):
     assert meta.duration > 0.0
 
 
+def test_pyav_engine_export_m4a(sample_sine_audio, tmp_path):
+    """Verify exporting audio to M4A (AAC) using PyAV."""
+    engine = AudioEngine(ffmpeg_path="pyav")
+    effects = AudioEffects(speed=1.0)
+    out_path = str(tmp_path / "pyav_output.m4a")
+
+    path, size = engine.export_audio(sample_sine_audio, out_path, effects, export_format="m4a")
+
+    assert os.path.isfile(path)
+    assert size > 0
+    meta = engine.probe_file(path)
+    assert meta.duration > 0.0
+
+
 def test_pyav_has_filter():
     """Verify has_filter queries PyAV available filters correctly."""
     engine = AudioEngine(ffmpeg_path="pyav")
@@ -136,7 +150,7 @@ def test_pyav_has_filter():
     assert engine.has_filter("nonexistent_fake_filter_xyz") is False
 
 def test_pyav_resolve_audio_encoder():
-    """Verify fallback from external encoders (libopus, libmp3lame) to native encoders (opus, mp3)."""
+    """Verify fallback from external encoders to native encoders and detection of missing codecs."""
     import av
     engine = AudioEngine(ffmpeg_path="pyav")
 
@@ -144,6 +158,7 @@ def test_pyav_resolve_audio_encoder():
     assert engine._resolve_audio_encoder("opus") in ("libopus", "opus")
     assert engine._resolve_audio_encoder("mp3") in ("libmp3lame", "mp3")
     assert engine._resolve_audio_encoder("wav") == "pcm_s16le"
+    assert engine._resolve_audio_encoder("m4a") in ("aac", "libfdk_aac")
 
     # Simulate mobile environment where libmp3lame and libopus are absent
     real_codec = av.Codec
@@ -155,25 +170,39 @@ def test_pyav_resolve_audio_encoder():
     import unittest.mock as mock
     with mock.patch("av.Codec", side_effect=mock_codec):
         assert engine._resolve_audio_encoder("opus") == "opus"
-        assert engine._resolve_audio_encoder("mp3") == "mp3"
+        assert engine.is_encoder_available("mp3") is False
+        with pytest.raises(RuntimeError, match="MP3 encoding"):
+            engine._resolve_audio_encoder("mp3")
 
 
 def test_pyav_engine_export_native_codecs(sample_sine_audio, tmp_path):
-    """Verify exporting audio works with native 'opus' and 'mp3' encoders directly."""
+    """Verify exporting audio works with native 'opus' and 'aac' encoders directly."""
     engine = AudioEngine(ffmpeg_path="pyav")
     effects = AudioEffects(speed=1.0)
 
-    # Force native 'opus' encoder
+    # Force native 'opus' encoder with strict options
     with unittest.mock.patch.object(engine, "_resolve_audio_encoder", return_value="opus"):
         out_opus = str(tmp_path / "native_output.opus")
         path, size = engine.export_audio(sample_sine_audio, out_opus, effects, export_format="opus")
         assert os.path.isfile(path)
         assert size > 0
 
-    # Force native 'mp3' encoder
-    with unittest.mock.patch.object(engine, "_resolve_audio_encoder", return_value="mp3"):
-        out_mp3 = str(tmp_path / "native_output.mp3")
-        path, size = engine.export_audio(sample_sine_audio, out_mp3, effects, export_format="mp3")
+    # Force native 'aac' encoder
+    with unittest.mock.patch.object(engine, "_resolve_audio_encoder", return_value="aac"):
+        out_m4a = str(tmp_path / "native_output.m4a")
+        path, size = engine.export_audio(sample_sine_audio, out_m4a, effects, export_format="m4a")
         assert os.path.isfile(path)
         assert size > 0
+
+    # Verify descriptive error when MP3 encoder is absent
+    import av
+    def mock_codec(name, mode='r'):
+        if name in ("libmp3lame", "mp3"):
+            raise av.error.CodecNotFoundError(f"Codec {name} not found")
+        return av.Codec(name, mode)
+
+    with unittest.mock.patch("av.Codec", side_effect=mock_codec):
+        out_mp3 = str(tmp_path / "fail_output.mp3")
+        with pytest.raises(RuntimeError, match="MP3 encoding"):
+            engine.export_audio(sample_sine_audio, out_mp3, effects, export_format="mp3")
 
