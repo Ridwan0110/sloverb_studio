@@ -615,6 +615,24 @@ class AudioEngine:
 
         return ",".join(filters)
 
+    @staticmethod
+    def _resolve_audio_encoder(ext: str) -> str:
+        """Resolves the best available audio encoder name in runtime FFmpeg / PyAV."""
+        import av
+        candidates = {
+            "opus": ["libopus", "opus"],
+            "mp3": ["libmp3lame", "mp3"],
+            "wav": ["pcm_s16le"],
+        }.get(ext.lower(), [ext.lower()])
+
+        for name in candidates:
+            try:
+                av.Codec(name, "w")
+                return name
+            except Exception:
+                continue
+        return candidates[-1]
+
     def _export_audio_pyav(
         self,
         input_path: str,
@@ -693,23 +711,20 @@ class AudioEngine:
             if effects.bass_boost_percent > 0.01 or effects.reverb_percent > 0.01:
                 nodes.append(graph.add("alimiter", "limit=0.98"))
 
-            sample_fmt = "fltp" if ext in ("opus", "mp3") else "s16"
-            nodes.append(graph.add("aformat", f"sample_fmts={sample_fmt}:sample_rates={target_rate}:channel_layouts=stereo"))
-            sink = graph.add("abuffersink")
-            nodes.append(sink)
-
-            graph.link_nodes(*nodes)
-            graph.configure()
+            encoder_name = self._resolve_audio_encoder(ext)
 
             with av.open(output_path, mode="w") as out_c:
-                if ext == "opus":
-                    out_s = out_c.add_stream("libopus", rate=target_rate, layout="stereo")
-                    out_s.bit_rate = 160000
-                elif ext == "mp3":
-                    out_s = out_c.add_stream("libmp3lame", rate=target_rate, layout="stereo")
-                    out_s.bit_rate = 192000
-                elif ext == "wav":
-                    out_s = out_c.add_stream("pcm_s16le", rate=target_rate, layout="stereo")
+                out_s = out_c.add_stream(encoder_name, rate=target_rate, layout="stereo")
+                if ext in ("opus", "mp3"):
+                    out_s.bit_rate = 160000 if ext == "opus" else 192000
+
+                sample_fmt = out_s.format.name if out_s.format else ("fltp" if ext in ("opus", "mp3") else "s16")
+                nodes.append(graph.add("aformat", f"sample_fmts={sample_fmt}:sample_rates={target_rate}:channel_layouts=stereo"))
+                sink = graph.add("abuffersink")
+                nodes.append(sink)
+
+                graph.link_nodes(*nodes)
+                graph.configure()
 
                 samples_seen = 0
                 stream_rate = in_s.rate or target_rate or 44100
