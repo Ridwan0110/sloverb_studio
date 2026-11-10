@@ -954,14 +954,6 @@ class SlowVerbApp:
             color=COLOR_CYAN,
         )
 
-        from slowverb import DEBUG_MODE
-        self.debug_tag_text = ft.Text(
-            f"DEBUG: {DEBUG_MODE}",
-            font_family=ROBOTIC_FONT,
-            size=11,
-            color=COLOR_TEXT_DIM,
-        )
-
         self.version_badge_text = ft.Text(
             f"v{self.version}",
             font_family=ROBOTIC_FONT,
@@ -1420,7 +1412,6 @@ class SlowVerbApp:
             ),
             ft.Row([
                 self.format_badge_text,
-                self.debug_tag_text,
                 self.version_badge_text,
                 ft.Container(width=30 if self.debug_mode else 0),
             ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -1598,7 +1589,6 @@ class SlowVerbApp:
             ),
             ft.Row([
                 self.format_badge_text,
-                self.debug_tag_text,
                 self.version_badge_text,
                 ft.Container(width=28 if self.debug_mode else 0),
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),

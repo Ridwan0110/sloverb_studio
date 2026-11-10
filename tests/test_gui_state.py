@@ -587,13 +587,10 @@ def test_section_titles_and_badges():
     assert header_title_text == "SLOVERB STUDIO"
     right_header_controls = header_row.controls[1].controls
     assert app.format_badge_text in right_header_controls
-    assert app.debug_tag_text in right_header_controls
     assert app.version_badge_text in right_header_controls
     codec_idx = right_header_controls.index(app.format_badge_text)
-    debug_idx = right_header_controls.index(app.debug_tag_text)
     version_idx = right_header_controls.index(app.version_badge_text)
-    assert debug_idx == codec_idx + 1
-    assert version_idx == debug_idx + 1
+    assert version_idx == codec_idx + 1
     import slowverb
     assert app.version == slowverb.__version__
     assert f"v{slowverb.__version__}" == app.version_badge_text.value
