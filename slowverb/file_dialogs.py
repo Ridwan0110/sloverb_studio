@@ -198,6 +198,7 @@ class FileService:
         or native save action, copying from the temp export cache.
         """
         self._pending_export_path = temp_exported_path
+        self._pending_filename = default_filename
 
         if not is_mobile_platform(self.page):
             # Desktop save dialog
