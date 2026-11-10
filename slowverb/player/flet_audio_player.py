@@ -38,6 +38,7 @@ class FletAudioPlayer(BaseAudioPlayer):
         self._duration: float = 0.0
         self._position: float = 0.0
         self._playing: bool = False
+        self._paused: bool = False
         self._lock = threading.Lock()
         self._temp_wav_path: Optional[str] = None
         self._audio: Optional[fta.Audio] = None
@@ -186,15 +187,36 @@ class FletAudioPlayer(BaseAudioPlayer):
                 return
             if self._position >= self._duration:
                 self._position = 0.0
+                self._paused = False
             self._playing = True
+            is_paused = self._paused
+            self._paused = False
+            target_pos = self._position
 
         if self._audio is not None:
-            self._dispatch_async(self._audio.play)
+            self._dispatch_async(self._audio_play_async, target_pos, is_paused)
+
+    async def _audio_play_async(self, target_pos: float, is_paused: bool):
+        if self._audio is not None:
+            try:
+                if is_paused:
+                    await self._audio.resume()
+                elif target_pos > 0.001:
+                    await self._audio.seek(int(target_pos * 1000))
+                    await self._audio.resume()
+                else:
+                    await self._audio.play()
+            except Exception:
+                try:
+                    await self._audio.resume()
+                except Exception:
+                    pass
 
     def pause(self):
         """Pauses playback while maintaining playhead position."""
         with self._lock:
             self._playing = False
+            self._paused = True
         if self._audio is not None:
             self._dispatch_async(self._audio.pause)
 
@@ -202,6 +224,7 @@ class FletAudioPlayer(BaseAudioPlayer):
         """Stops playback and rewinds to beginning."""
         with self._lock:
             self._playing = False
+            self._paused = False
             self._position = 0.0
         if self._audio is not None:
             self._dispatch_async(self._audio_stop_async)
@@ -269,6 +292,7 @@ class FletAudioPlayer(BaseAudioPlayer):
         if "completed" in state_str:
             with self._lock:
                 self._playing = False
+                self._paused = False
                 self._position = self._duration
             if self._on_playback_finished:
                 threading.Thread(target=self._on_playback_finished, daemon=True).start()

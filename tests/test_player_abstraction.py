@@ -124,3 +124,50 @@ def test_flet_audio_player_callbacks():
     assert player.get_current_time() == 2.0
 
     player.close()
+
+
+def test_flet_audio_player_pause_play_maintains_position():
+    """Verify that pausing and playing maintains current playhead position without restarting."""
+    page = MagicMock()
+    page.platform = ft.PagePlatform.ANDROID
+    page.overlay = []
+    page.services = []
+
+    player = FletAudioPlayer(page=page)
+    sr = 44100
+    data = np.zeros((sr * 10, 2), dtype=np.float32)
+    player.load_buffer(data, sample_rate=sr)
+
+    # Seek to 4.5s
+    player.seek(4.5)
+    assert abs(player.get_current_time() - 4.5) < 0.01
+
+    # Play from seeked position
+    player.play()
+    assert player.is_playing() is True
+    assert abs(player.get_current_time() - 4.5) < 0.01
+
+    # Advance position to 5.2s
+    pos_event = MagicMock()
+    pos_event.position = 5200
+    player._on_position_change(pos_event)
+    assert abs(player.get_current_time() - 5.2) < 0.01
+
+    # Pause
+    player.pause()
+    assert player.is_playing() is False
+    assert abs(player.get_current_time() - 5.2) < 0.01
+    assert player._paused is True
+
+    # Play after pause resumes from 5.2s, does NOT reset to 0
+    player.play()
+    assert player.is_playing() is True
+    assert abs(player.get_current_time() - 5.2) < 0.01
+
+    # Stop explicitly resets to 0.0s
+    player.stop()
+    assert player.is_playing() is False
+    assert player._paused is False
+    assert player.get_current_time() == 0.0
+
+    player.close()
