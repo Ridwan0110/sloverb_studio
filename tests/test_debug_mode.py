@@ -148,6 +148,11 @@ def test_debug_button_overlay_mounting():
     assert app_on.debug_button.top == 12
     assert app_on.debug_button.right == 14
 
+    page_mobile = MockPage()
+    app_mobile = SlowVerbApp(page=page_mobile, debug_mode=True, force_mobile_ui=True)
+    assert app_mobile.debug_button.top == 44
+    assert app_mobile.debug_button.right == 12
+
 
 def test_debug_button_present_in_overlay_on_ffmpeg_missing():
     """Verifies debug button is mounted in page.overlay even when FFmpeg is missing (FFmpegSetupView)."""

@@ -802,9 +802,15 @@ class SlowVerbApp:
         if is_mobile:
             self.page.padding = ft.Padding.only(top=42, left=12, right=12, bottom=12)
             self.page.scroll = ft.ScrollMode.ADAPTIVE
+            if hasattr(self, "debug_button") and self.debug_button:
+                self.debug_button.top = 44
+                self.debug_button.right = 12
         else:
             self.page.padding = 16
             self.page.scroll = ft.ScrollMode.AUTO
+            if hasattr(self, "debug_button") and self.debug_button:
+                self.debug_button.top = 12
+                self.debug_button.right = 14
 
         # Register FontAwesome Free Solid font
         self.page.fonts = {
